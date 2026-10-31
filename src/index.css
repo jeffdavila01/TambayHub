@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-tambay-50: #fff7ed;
+  --color-tambay-500: #f97316;
+  --color-tambay-600: #ea580c;
+  --color-tambay-900: #7c2d12;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: Inter, system-ui, sans-serif;
+}
