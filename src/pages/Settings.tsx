@@ -1,9 +1,10 @@
+import LogoutButton from '../components/auth/LogoutButton'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
-import { Moon, Sun, LogOut, User } from 'lucide-react'
+import { Moon, Sun, User } from 'lucide-react'
 
 export default function Settings() {
-    const { user, profile, signOut } = useAuth()
+    const { user, profile } = useAuth()
     const { theme, toggleTheme } = useTheme()
 
     return (
@@ -26,7 +27,7 @@ export default function Settings() {
                     <span className="text-sm text-zinc-500">{theme === 'dark' ? 'Dark' : 'Light'} {theme === 'dark' ? <Sun className="w-4 h-4 inline ml-1" /> : <Moon className="w-4 h-4 inline ml-1" />}</span>
                 </button>
                 <button className="w-full flex items-center gap-2 p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm"><User className="w-4 h-4" /> Edit Profile</button>
-                <button onClick={signOut} className="w-full flex items-center gap-2 p-4 hover:bg-red-50 text-red-600 text-sm"><LogOut className="w-4 h-4" /> Log Out</button>
+                <LogoutButton className="settings-logout"/>
             </div>
         </div>
     )
