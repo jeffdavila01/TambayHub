@@ -1,37 +1,36 @@
 import { useState } from 'react'
 import { supabase } from '../../services/supabase'
 import { Link } from 'react-router-dom'
+import { ArrowRight, Mail, UserRound, AlertCircle, CircleCheck, LoaderCircle } from 'lucide-react'
+import AuthLayout from '../../components/auth/AuthLayout'
+import PasswordField from '../../components/auth/PasswordField'
 
 export default function Register() {
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
-    const [username, setUsername] = useState('')
-    const [msg, setMsg] = useState('')
-    const [err, setErr] = useState('')
-
-    const handleRegister = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setErr(''); setMsg('')
-        const { data, error } = await supabase.auth.signUp({ email, password })
-        if (error) { setErr(error.message); return }
-        if (data.user) {
-            await supabase.from('profiles').update({ username, display_name: username }).eq('id', data.user.id)
-            setMsg('Check your email for verification!')
-        }
+ const [email, setEmail] = useState('')
+ const [password, setPassword] = useState('')
+ const [username, setUsername] = useState('')
+ const [msg, setMsg] = useState('')
+ const [err, setErr] = useState('')
+ const [loading, setLoading] = useState(false)
+ const handleRegister = async (event: React.FormEvent) => {
+  event.preventDefault()
+  if (loading) return
+  setErr(''); setMsg(''); setLoading(true)
+  try {
+   const name = username.trim()
+   if (!name) { setErr('Please enter a username.'); return }
+   const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { username: name, display_name: name } } })
+   if (error) { setErr(error.message); return }
+   if (data.user) {
+    // Unconfirmed accounts may not have permission to update profiles yet.
+    if (data.session) {
+     const { error: profileError } = await supabase.from('profiles').update({ username: name, display_name: name }).eq('id', data.user.id)
+     if (profileError) { setMsg('Account created! You can finish setting your username on your profile.'); return }
     }
-
-    return (
-        <div className="min-h-screen grid place-items-center bg-zinc-50 dark:bg-zinc-950 p-4">
-            <form onSubmit={handleRegister} className="w-full max-w-sm bg-white dark:bg-zinc-900 p-6 rounded-2xl border dark:border-zinc-800 space-y-4">
-                <h1 className="text-xl font-bold">Join TambayHub</h1>
-                {err && <div className="p-2 bg-red-50 text-red-600 text-sm rounded">{err}</div>}
-                {msg && <div className="p-2 bg-green-50 text-green-600 text-sm rounded">{msg}</div>}
-                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" required className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 outline-none text-sm" />
-                <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" required className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 outline-none text-sm" />
-                <input value={password} onChange={e => setPassword(e.target.value)} placeholder="Password (min 6)" type="password" required className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 outline-none text-sm" />
-                <button className="w-full py-2.5 rounded-xl bg-orange-500 text-white font-medium text-sm">Create Account</button>
-                <p className="text-xs text-center text-zinc-500"><Link to="/login" className="underline">Already have account?</Link></p>
-            </form>
-        </div>
-    )
+    setMsg(data.session ? 'Your account is ready! You can now log in.' : 'Check your email to verify your account, then come back to log in.')
+   }
+  } catch (error) { setErr(error instanceof Error ? error.message : 'Unable to create your account. Please try again.') }
+  finally { setLoading(false) }
+ }
+ return <AuthLayout><div className="auth-card surface"><div className="auth-card-tabs"><Link to="/login">Log in</Link><Link to="/register" className="active" aria-current="page">Create account</Link></div><div className="auth-form-heading"><span className="auth-kicker">THERE IS ROOM FOR YOU HERE</span><h2>Find your tambayan.</h2><p>Your next good conversation starts here.</p></div><form onSubmit={handleRegister} className="auth-form" aria-busy={loading}>{err&&<div role="alert" className="auth-alert"><AlertCircle size={16}/><span>{err}</span></div>}{msg&&<div role="status" className="auth-alert auth-success"><CircleCheck size={17}/><span>{msg} <Link to="/login">Go to login</Link></span></div>}<div className="auth-field"><label htmlFor="username">Username</label><div className="auth-input-wrap"><UserRound size={17}/><input id="username" name="username" autoComplete="username" required maxLength={40} value={username} onChange={event=>setUsername(event.target.value)} placeholder="What should we call you?"/></div></div><div className="auth-field"><label htmlFor="email">Email address</label><div className="auth-input-wrap"><Mail size={17}/><input id="email" name="email" type="email" autoComplete="email" required value={email} onChange={event=>setEmail(event.target.value)} placeholder="you@example.com"/></div></div><div className="auth-field"><label htmlFor="password">Password</label><PasswordField value={password} onChange={setPassword} newPassword/><small className="auth-field-hint">Use at least 6 characters.</small></div><button type="submit" disabled={loading||Boolean(msg)} className="auth-submit">{loading?<><LoaderCircle size={17} className="auth-spinner"/> Creating account...</>:<>Create account <ArrowRight size={17}/></>}</button></form><p className="auth-switch-copy">Already part of the barkada? <Link to="/login">Log in</Link></p></div><p className="auth-panel-caption">Make yourself at home. Your people are here.</p></AuthLayout>
 }
