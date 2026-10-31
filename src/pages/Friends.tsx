@@ -93,12 +93,12 @@ export default function Friends() {
     }, [searchQuery])
 
     return (
-        <div className="max-w-3xl mx-auto space-y-6">
+        <div className="friends-page max-w-3xl mx-auto space-y-6">
             <div className="flex items-center justify-between gap-3"><h1 className="text-2xl font-bold flex items-center gap-2"><Users className="w-6 h-6" /> Friends</h1><button onClick={()=>setActiveTab('search')} className="purple-button"><UserPlus size={15}/> Add Friends</button></div>
 
             {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
             {notice && <p role="status" className="text-sm text-violet-600">{notice}</p>}
-            <div className="flex gap-2 border-b">
+            <div className="friends-tabs flex gap-2 border-b">
                 <button onClick={() => setActiveTab('friends')} className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === 'friends' ? 'border-violet-500 text-violet-600' : 'border-transparent'}`}>My Friends ({friends.length})</button>
                 <button onClick={() => setActiveTab('requests')} className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === 'requests' ? 'border-violet-500 text-violet-600' : 'border-transparent'}`}>Requests ({requests.length})</button>
                 <button onClick={() => setActiveTab('search')} className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === 'search' ? 'border-violet-500 text-violet-600' : 'border-transparent'}`}>Add Friend</button>

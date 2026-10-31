@@ -50,7 +50,7 @@ export default function Profile() {
     if (loading) return <div className="p-6">Loading profile...</div>
 
     return (
-        <div className="max-w-2xl mx-auto space-y-4">
+        <div className="profile-page max-w-2xl mx-auto space-y-4">
             <div className="bg-white dark:bg-zinc-900 rounded-2xl border dark:border-zinc-800 overflow-hidden">
                 <div className="h-32 bg-gradient-to-br from-orange-400 to-purple-600" />
                 <div className="p-6">

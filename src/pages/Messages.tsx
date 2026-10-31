@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { loadFriendships } from '../services/friendships'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Search, Send, MessageCircle } from 'lucide-react'
+import { Search, Send, MessageCircle, ArrowLeft } from 'lucide-react'
 
 interface DM {
     id: string
@@ -79,8 +79,8 @@ export default function Messages() {
     }, [selectedUser])
 
     return (
-        <div className="max-w-5xl mx-auto h-[calc(100vh-8rem)] flex bg-white dark:bg-zinc-900 rounded-2xl border overflow-hidden">
-            <div className="w-80 border-r flex flex-col">
+        <div className={`messages-layout surface ${selectedUser ? 'conversation-selected' : ''}`}>
+            <div className="messages-directory">
                 <div className="p-4 border-b">
                     <h2 className="font-bold flex items-center gap-2"><MessageCircle className="w-5 h-5" /> Messages</h2>
                     <div className="mt-3 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 rounded-full px-3 py-1.5">
@@ -108,23 +108,23 @@ export default function Messages() {
                 </div>
             </div>
 
-            <div className="flex-1 flex flex-col">
+            <div className="messages-conversation">
                 {error && <p role="alert" className="p-3 text-xs text-red-600">{error}</p>}
                 {!selectedUser ? (
                     <div className="flex-1 grid place-items-center text-zinc-500"><p className="text-sm">Select a conversation</p></div>
                 ) : (
                     <>
-                        <div className="p-4 border-b flex items-center gap-3">
+                        <div className="message-thread-header p-4 border-b flex items-center gap-3"><button type="button" className="messages-back" onClick={()=>setSelectedUser(null)} aria-label="Back to conversations"><ArrowLeft size={20}/></button>
                             <img src={selectedUser.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${selectedUser.username}`} className="w-8 h-8 rounded-full" />
                             <span className="font-medium text-sm">{selectedUser.username}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                        <div className="message-thread-body flex-1 overflow-y-auto p-4 space-y-2">
                             {messages.map(m => {
                                 const isMe = m.sender_id === user?.id
-                                return <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[70%] px-3 py-2 rounded-2xl text-sm ${isMe ? 'bg-orange-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}>{m.content}</div></div>
+                                return <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[80%] break-words whitespace-pre-wrap px-3 py-2 rounded-2xl text-sm ${isMe ? 'bg-orange-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}>{m.content}</div></div>
                             })}
                         </div>
-                        <div className="p-3 border-t flex gap-2">
+                        <div className="message-thread-compose p-3 border-t flex gap-2">
                             <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="Type a message..." className="flex-1 bg-zinc-100 dark:bg-zinc-800 rounded-full px-4 py-2 text-sm outline-none" />
                             <button onClick={sendMessage} className="p-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-full"><Send className="w-4 h-4" /></button>
                         </div>

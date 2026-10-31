@@ -19,8 +19,8 @@ export function useRoomCall({ roomId, userId, stream, camOn, micOn }: { roomId?:
  useEffect(()=>{
   localRef.current={stream,camOn,micOn}
   for(const peer of peersRef.current.values()) {
-   void peer.audio.sender.replaceTrack(stream?.getAudioTracks()[0] || null).catch(()=>{})
-   void peer.video.sender.replaceTrack(stream?.getVideoTracks()[0] || null).catch(()=>{})
+   void peer.audio.sender.replaceTrack(stream?.getAudioTracks()[0] || null).catch(()=>setCallError('Your microphone could not be sent. Turn the microphone off and on, or rejoin the room.'))
+   void peer.video.sender.replaceTrack(stream?.getVideoTracks()[0] || null).catch(()=>setCallError('Your camera could not be sent. Turn the camera off and on, or rejoin the room.'))
   }
   if(ready&&channelRef.current&&userId)void channelRef.current.track({peerId:peerIdRef.current,userId,camOn,micOn})
  },[stream,camOn,micOn,ready,userId])
@@ -28,6 +28,7 @@ export function useRoomCall({ roomId, userId, stream, camOn, micOn }: { roomId?:
   if(!roomId||!userId)return
   if(!window.RTCPeerConnection){setCallError('Live calls are not supported in this browser.');return}
   let active=true
+  setReady(false);setRemoteMedia({})
   const peerId=peerIdRef.current
   const peers=peersRef.current
   const channel=supabase.channel(`room-call:${roomId}`,{config:{private:true,presence:{key:peerId},broadcast:{ack:true}}})
@@ -117,6 +118,13 @@ export function useRoomCall({ roomId, userId, stream, camOn, micOn }: { roomId?:
       peer.settingAnswer=description.type==='answer'
       await pc.setRemoteDescription(description)
       peer.settingAnswer=false
+      const negotiated = pc.getTransceivers().filter(item => item.mid !== null)
+      const audio = negotiated.find(item => item.receiver.track.kind === 'audio')
+      const video = negotiated.find(item => item.receiver.track.kind === 'video')
+      if (audio) peer.audio = audio
+      if (video) peer.video = video
+      await peer.audio.sender.replaceTrack(localRef.current.stream?.getAudioTracks()[0] || null)
+      await peer.video.sender.replaceTrack(localRef.current.stream?.getVideoTracks()[0] || null)
       for(const candidate of peer.candidates.splice(0))await pc.addIceCandidate(candidate)
       if(description.type==='offer'){
        await pc.setLocalDescription()
@@ -128,7 +136,16 @@ export function useRoomCall({ roomId, userId, stream, camOn, micOn }: { roomId?:
      }
     }catch{if(active&&!peer.ignoreOffer)setCallError('A call connection could not be established. Try leaving and rejoining the room.')}
    })
-  }).subscribe(async status=>{
+  })
+  const connect = async () => {
+   const { data, error } = await supabase.rpc('can_join_room_call', { p_topic: `room-call:${roomId}` })
+   if (!active) return
+   if (error) {
+    setCallError(error.code === 'PGRST202' ? 'VC setup is missing. Run 202610310002_room_calls.sql in Supabase, then re-enter this room.' : `Live call access check failed: ${error.message}`)
+    return
+   }
+   if (!data) { setCallError('Join this room or accept its invitation before starting a video call.'); return }
+   channel.subscribe(async status=>{
    if(!active)return
    if(status==='SUBSCRIBED'){
     setReady(true);setCallError('')
@@ -137,7 +154,9 @@ export function useRoomCall({ roomId, userId, stream, camOn, micOn }: { roomId?:
     setReady(false)
     setCallError('Live call could not connect. Check room membership and run the room call SQL setup in Supabase.')
    }
-  })
+   })
+  }
+  void connect().catch(() => { if (active) setCallError('Unable to reach the live call service. Check your connection and re-enter the room.') })
   return()=>{
    active=false
    for(const id of peers.keys())removePeer(id)
