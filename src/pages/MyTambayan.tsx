@@ -1,86 +1,97 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Users, Lock } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Plus, Users, Lock, Search, Link2, Copy, ArrowRight, Clapperboard, LoaderCircle } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { inviteLink, parseInvite } from '../services/roomInvites'
 
+type Room = { id: string, name: string, description: string | null, owner_id: string, privacy?: string, invite_code?: string }
 export default function MyTambayan() {
-    const { user } = useAuth()
-    const nav = useNavigate()
-    const [rooms, setRooms] = useState<any[]>([])
-    const [myRooms, setMyRooms] = useState<any[]>([])
-    const [name, setName] = useState('')
-    const [desc, setDesc] = useState('')
-    const [showCreate, setShowCreate] = useState(false)
-
-    const fetchRooms = async () => {
-        const { data: all } = await supabase.from('rooms').select('*').order('created_at', { ascending: false })
-        setRooms(all || [])
-        if (user) {
-            const { data: members } = await supabase.from('room_members').select('room_id').eq('user_id', user.id)
-            const ids = members?.map(m => m.room_id) || []
-            setMyRooms(all?.filter(r => ids.includes(r.id)) || [])
-        }
-    }
-
-    useEffect(() => { fetchRooms() }, [])
-
-    const createRoom = async () => {
-        if (!name.trim() || !user) return
-        const { data, error } = await supabase.from('rooms').insert({ name, description: desc, owner_id: user.id }).select().single()
-        if (!error && data) {
-            await supabase.from('room_members').insert({ room_id: data.id, user_id: user.id, role: 'owner' })
-            setName(''); setDesc(''); setShowCreate(false); fetchRooms()
-        }
-    }
-
-    const joinRoom = async (roomId: string) => {
-        if (!user) return
-        const { error } = await supabase.from('room_members').insert({ room_id: roomId, user_id: user.id })
-        if (!error) fetchRooms()
-        else if (error.code === '23505') alert('Joined na sa room na yan!')
-    }
-
-    return (
-        <div className="max-w-3xl mx-auto space-y-6">
-            <div className="flex justify-between items-center">
-                <h1 className="text-xl font-bold">Tambay Rooms</h1>
-                <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500 text-white text-sm font-medium"><Plus className="w-4 h-4" /> Create Tambayan</button>
-            </div>
-
-            <p className="text-sm text-zinc-500">Movie night or kantahan? One room, same barkada. The host can switch between Cinema and Videoke.</p>
-            {showCreate && (
-                <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border dark:border-zinc-800 space-y-3">
-                    <input value={name} onChange={e => setName(e.target.value)} placeholder="Tambayan name (e.g. Barkada Gaming)" className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm outline-none" />
-                    <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="Anong ganap dito?" className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm outline-none" rows={2} />
-                    <button onClick={createRoom} className="w-full py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-black text-sm">Create Permanent Room</button>
-                </div>
-            )}
-
-            <div>
-                <h2 className="font-semibold mb-3">Rooms mo ({myRooms.length})</h2>
-                <div className="grid md:grid-cols-2 gap-3">
-                    {myRooms.map(r => (
-                        <div key={r.id} className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border dark:border-zinc-800">
-                            <h3 className="font-bold">{r.name}</h3><p className="text-xs text-zinc-500 mt-1">{r.description}</p>
-                            <div className="flex items-center gap-2 mt-3 text-xs text-zinc-500"><Users className="w-3 h-3" /> Invite: {r.invite_code}</div>
-                            <button onClick={() => nav(`/room/${r.id}`)} className="mt-3 w-full py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-black text-sm">Enter Tambay Room</button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <div>
-                <h2 className="font-semibold mb-3">Discover Public Tambayans</h2>
-                <div className="grid md:grid-cols-2 gap-3">
-                    {rooms.map(r => (
-                        <div key={r.id} className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border dark:border-zinc-800">
-                            <h3 className="font-medium flex items-center gap-2">{r.name} {r.privacy === 'private' && <Lock className="w-3 h-3" />}</h3><p className="text-xs text-zinc-500 mt-1">{r.description}</p>
-                            <button onClick={() => joinRoom(r.id)} className="mt-3 w-full py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm">Join Room</button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    )
+ const { user } = useAuth()
+ const navigate = useNavigate()
+ const [params, setParams] = useSearchParams()
+ const invite = params.get('invite') || ''
+ const [rooms, setRooms] = useState<Room[]>([])
+ const [memberIds, setMemberIds] = useState<string[]>([])
+ const [search, setSearch] = useState('')
+ const [code, setCode] = useState(invite)
+ const [invitedRoom, setInvitedRoom] = useState<Room | null>(null)
+ const [name, setName] = useState('')
+ const [description, setDescription] = useState('')
+ const [showCreate, setShowCreate] = useState(false)
+ const [loading, setLoading] = useState(true)
+ const [busy, setBusy] = useState(false)
+ const [error, setError] = useState('')
+ const [notice, setNotice] = useState('')
+ const fetchRooms = useCallback(async () => {
+  if (!user) return
+  const [all, members] = await Promise.all([
+   supabase.from('rooms').select('*').order('created_at', { ascending: false }),
+   supabase.from('room_members').select('room_id').eq('user_id', user.id),
+  ])
+  if (all.error || members.error) setError(all.error?.message || members.error?.message || 'Unable to load rooms.')
+  if (all.data) setRooms(all.data)
+  if (members.data) setMemberIds(members.data.map(member => member.room_id))
+  setLoading(false)
+ }, [user?.id])
+ useEffect(() => { void fetchRooms() }, [fetchRooms])
+ useEffect(() => {
+  if (!invite) { setInvitedRoom(null); return }
+  let active = true
+  setCode(invite)
+  setInvitedRoom(null)
+  const load = async () => {
+   const { data, error } = await supabase.from('rooms').select('*').eq('invite_code', invite).maybeSingle()
+   if (!active) return
+   if (error) setError(error.message)
+   else if (!data) setError('Room not found or this invite is not accessible. Ask the host to check the code and room access.')
+   else { setInvitedRoom(data); setError('') }
+  }
+  void load()
+  return () => { active = false }
+ }, [invite])
+ const joinRoom = async (room: Room) => {
+  if (!user || busy) return
+  setBusy(true); setError('')
+  try {
+   if (room.owner_id !== user.id && !memberIds.includes(room.id)) {
+    const { error } = await supabase.from('room_members').insert({ room_id: room.id, user_id: user.id })
+    if (error && error.code !== '23505') { setError(error.message); return }
+   }
+   navigate(`/room/${room.id}`)
+  } catch (err) { setError(err instanceof Error ? err.message : 'Unable to join room.') }
+  finally { setBusy(false) }
+ }
+ const createRoom = async (event: React.FormEvent) => {
+  event.preventDefault()
+  if (!name.trim() || !user || busy) return
+  setBusy(true); setError(''); setNotice('')
+  try {
+   const { data, error } = await supabase.from('rooms').insert({ name: name.trim(), description: description.trim(), owner_id: user.id }).select().single()
+   if (error) { setError(error.message); return }
+   const { error: membershipError } = await supabase.from('room_members').insert({ room_id: data.id, user_id: user.id, role: 'owner' })
+   if (membershipError && membershipError.code !== '23505') setError(`Room created, but membership could not be saved: ${membershipError.message}`)
+   else setNotice('Room created! Copy its invite link to bring your friends.')
+   setName(''); setDescription(''); setShowCreate(false)
+   await fetchRooms()
+  } catch (err) { setError(err instanceof Error ? err.message : 'Unable to create room.') }
+  finally { setBusy(false) }
+ }
+ const copyInvite = async (room: Room) => {
+  if (!room.invite_code) { setError('This room has no invite code. Ask the room owner to check its settings.'); return }
+  try { await navigator.clipboard.writeText(inviteLink(room.invite_code, window.location.origin)); setNotice(`Invite link copied for ${room.name}. Send it to your friend.`) }
+  catch { setError('Could not copy automatically. Copy the invite code shown on the room card instead.') }
+ }
+ const lookupInvite = (event: React.FormEvent) => {
+  event.preventDefault()
+  const parsed = parseInvite(code, window.location.origin)
+  if (!parsed) { setError('Enter a valid invite code or a room invite link from this app.'); return }
+  setError('')
+  setParams({ invite: parsed })
+ }
+ const matches = (room: Room) => `${room.name} ${room.description || ''}`.toLowerCase().includes(search.trim().toLowerCase())
+ const mine = rooms.filter(room => room.owner_id === user?.id || memberIds.includes(room.id)).filter(matches)
+ const publicRooms = rooms.filter(room => room.privacy !== 'private' && room.owner_id !== user?.id && !memberIds.includes(room.id)).filter(matches)
+ const card = (room: Room, member: boolean) => <article className="surface room-directory-card" key={room.id}><span className="room-directory-icon"><Clapperboard size={22}/></span><div className="room-directory-title"><h3>{room.name}</h3>{room.privacy==='private'&&<Lock size={14}/>}</div><p>{room.description || 'Cinema, videoke, and good company.'}</p>{member&&room.invite_code&&<span className="room-invite-code"><Users size={12}/> Code: <strong>{room.invite_code}</strong></span>}<div className="room-card-actions">{member&&<button type="button" onClick={()=>void copyInvite(room)}><Copy size={13}/> Copy invite</button>}<button type="button" className="purple-button" disabled={busy} onClick={()=>void joinRoom(room)}>{member?'Enter room':'Join room'}<ArrowRight size={13}/></button></div></article>
+ return <div className="room-directory"><div className="room-directory-header"><div><span className="auth-kicker">YOUR BARKADA, ONE ROOM AWAY</span><h1>Tambay Rooms</h1><p>Find a tambayan, invite your people, and settle in.</p></div><button className="purple-button" onClick={()=>setShowCreate(!showCreate)}><Plus size={15}/> Create room</button></div>{error&&<p className="room-directory-alert" role="alert">{error}</p>}{notice&&<p className="room-directory-notice" role="status">{notice}</p>}<div className="room-directory-tools"><label className="room-search"><Search size={17}/><input aria-label="Search rooms" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search room name or description..."/></label><form className="room-join-code" onSubmit={lookupInvite}><Link2 size={16}/><input aria-label="Invite code or link" required value={code} onChange={event=>setCode(event.target.value)} placeholder="Paste invite code or link"/><button type="submit">Find room <ArrowRight size={13}/></button></form></div>{invitedRoom&&<section className="surface room-invite-preview"><span className="auth-kicker">YOU ARE INVITED</span><h2>{invitedRoom.name}</h2><p>{invitedRoom.description || 'Join your friends in this Tambay Room.'}</p><button className="purple-button" disabled={busy} onClick={()=>void joinRoom(invitedRoom)}>Join room <ArrowRight size={14}/></button></section>}{showCreate&&<form className="surface room-create-form" onSubmit={createRoom}><h2>Create your tambayan</h2><label>Room name<input required maxLength={100} value={name} onChange={event=>setName(event.target.value)} placeholder="e.g. Friday Movie Night"/></label><label>Description<textarea value={description} maxLength={500} onChange={event=>setDescription(event.target.value)} placeholder="What's the plan?" rows={2}/></label><button className="purple-button" disabled={busy}>{busy?'Creating...':'Create room'}</button></form>}{loading?<p className="room-directory-empty"><LoaderCircle size={16} className="auth-spinner"/> Loading rooms...</p>:<><section><h2 className="room-section-title">Your rooms <span>{mine.length}</span></h2><div className="room-directory-grid">{mine.map(room=>card(room,true))}</div>{!mine.length&&<p className="room-directory-empty">{search?'No matching rooms. Try another name.':'Create a room or use an invite link to join your barkada.'}</p>}</section><section><h2 className="room-section-title">Discover public rooms <span>{publicRooms.length}</span></h2><div className="room-directory-grid">{publicRooms.map(room=>card(room,false))}</div>{!publicRooms.length&&<p className="room-directory-empty">{search?'No public rooms match your search.':'No public rooms to join yet.'}</p>}</section></>}</div>
 }

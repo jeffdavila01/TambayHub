@@ -1,3 +1,4 @@
+import RoomInvitations from '../components/rooms/RoomInvitations'
 import { useEffect, useState } from 'react'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -50,6 +51,7 @@ export default function Notifications() {
                 <button onClick={markAllRead} className="text-sm text-orange-600">Mark all read</button>
             </div>
 
+            <RoomInvitations/>
             <div className="space-y-2">
                 {notifications.length === 0 ? (
                     <div className="text-center py-20 text-zinc-500"><Bell className="w-10 h-10 mx-auto mb-2 opacity-50" /><p className="text-sm">No notifications yet</p><p className="text-xs">Likes, friend requests, and invites will appear here</p></div>
