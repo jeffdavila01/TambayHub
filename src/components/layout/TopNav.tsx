@@ -1,31 +1,15 @@
-import { Search, Moon, Sun, Bell, MessageCircle, LogOut } from 'lucide-react'
+import { Moon, Sun, Home, MessageCircle, Clapperboard, Coins, Layers } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
 import { useTheme } from '../../contexts/ThemeContext'
+import Avatar from '../ui/Avatar'
 import { useAuth } from '../../contexts/AuthContext'
 
 export default function TopNav() {
-    const { theme, toggleTheme } = useTheme()
-    const { user, profile, signOut } = useAuth()
-    return (
-        <header className="h-14 border-b bg-white/80 dark:bg-zinc-900/80 backdrop-blur sticky top-0 z-40 flex items-center px-4 justify-between dark:border-zinc-800">
-            <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-400 to-purple-600 grid place-items-center text-white font-black">T</div>
-                <span className="font-bold hidden sm:block">TambayHub</span>
-            </div>
-            <div className="flex-1 max-w-md mx-4 hidden md:flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 rounded-full px-3 py-1.5">
-                <Search className="w-4 h-4 text-zinc-400" />
-                <input placeholder="Search tambayan..." className="bg-transparent outline-none text-sm w-full" />
-            </div>
-            <div className="flex items-center gap-1">
-                <button onClick={toggleTheme} className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800">{theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
-                <button className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"><MessageCircle className="w-5 h-5" /></button>
-                <button className="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"><Bell className="w-5 h-5" /></button>
-                <img
-                    src={profile?.avatar_url || user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${profile?.username || user?.email || 'T'}`}
-                    alt={profile?.username || 'Profile'}
-                    className="w-8 h-8 rounded-full ml-2 object-cover bg-zinc-100"
-                />
-                <button onClick={signOut} className="p-2 rounded-full hover:bg-red-50 text-zinc-500 hover:text-red-600"><LogOut className="w-5 h-5" /></button>
-            </div>
-        </header>
-    )
+ const { theme, toggleTheme } = useTheme()
+ const { profile, user } = useAuth()
+ return <header className="hub-header"><div className="hub-header-inner">
+  <NavLink to="/" className="hub-brand"><span className="brand-mark">T</span><span><strong>TambayHub <b>REDESIGN</b></strong><small>Violet · Lunar · Social · Premium System</small></span></NavLink>
+  <nav className="top-tabs"><span><Layers/> Shell</span>{[{to:'/',label:'Home',icon:Home},{to:'/messages',label:'Messages',icon:MessageCircle},{to:'/my-tambayan',label:'Tambay Room',icon:Clapperboard},{to:'/explore',label:'Tokens',icon:Coins}].map(item=><NavLink key={item.label} to={item.to}><item.icon/>{item.label}</NavLink>)}</nav>
+  <div className="header-actions"><button onClick={toggleTheme} aria-label="Toggle color theme">{theme==='dark'?<Sun/>:<Moon/>}</button><NavLink to="/profile" aria-label="Your profile"><Avatar src={profile?.avatar_url || user?.user_metadata?.avatar_url} name={profile?.display_name || profile?.username || 'You'}/></NavLink></div>
+ </div></header>
 }

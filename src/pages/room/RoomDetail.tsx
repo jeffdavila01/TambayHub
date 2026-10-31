@@ -1,119 +1,238 @@
-import { useEffect, useState, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../../services/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Film, Play, Pause, MessageCircle } from 'lucide-react'
+import { activityPrefix, initialActivity, parseActivity, type RoomActivity, type RoomMode } from '../../services/roomActivity'
+import Avatar from '../../components/ui/Avatar'
+import { Clapperboard, Users, Settings2, Maximize, Minimize, PhoneOff, Video, VideoOff, Mic, MicOff, Send, MessageCircle, Play, Pause, Volume2, VolumeX, Link2, X, Armchair, Radio, ListMusic, SkipForward, Plus } from 'lucide-react'
+
+type Person = { id: string, username: string, display_name?: string, avatar_url?: string }
+const formatTime = (value: number) => `${Math.floor((value || 0) / 60)}:${String(Math.floor((value || 0) % 60)).padStart(2, '0')}`
 
 export default function RoomDetail() {
-    const { id } = useParams()
-    const { user } = useAuth()
-    const [room, setRoom] = useState<any>(null)
-    const [messages, setMessages] = useState<any[]>([])
-    const [newMsg, setNewMsg] = useState('')
-    const [inCall, setInCall] = useState(false)
-    const [camOn, setCamOn] = useState(true)
-    const [micOn, setMicOn] = useState(true)
-    const [mode, setMode] = useState<'call' | 'cinema'>('call')
-    const [cinema, setCinema] = useState<any>(null)
-    const [videoUrl, setVideoUrl] = useState('')
-    const videoRef = useRef<HTMLVideoElement>(null)
-    const streamRef = useRef<MediaStream | null>(null)
-    const cinemaVideoRef = useRef<HTMLVideoElement>(null)
+ const { id } = useParams()
+ const { user, profile } = useAuth()
+ const [activity, setActivity] = useState<RoomActivity>(initialActivity)
+ const [songTitle, setSongTitle] = useState('')
+ const [songUrl, setSongUrl] = useState('')
+ const [singer, setSinger] = useState('')
+ const roomOwnerRef = useRef<string | null>(null)
+ const [room, setRoom] = useState<any>(null)
+ const [loading, setLoading] = useState(true)
+ const [error, setError] = useState('')
+ const [messages, setMessages] = useState<any[]>([])
+ const [authors, setAuthors] = useState<Record<string, Person>>({})
+ const [participants, setParticipants] = useState<Person[]>([])
+ const [newMsg, setNewMsg] = useState('')
+ const [sending, setSending] = useState(false)
+ const [cinema, setCinema] = useState<any>(null)
+ const [videoUrl, setVideoUrl] = useState('')
+ const [settingsOpen, setSettingsOpen] = useState(false)
+ const [tab, setTab] = useState<'chat' | 'people'>('chat')
+ const [stream, setStream] = useState<MediaStream | null>(null)
+ const [camOn, setCamOn] = useState(false)
+ const [micOn, setMicOn] = useState(false)
+ const [currentTime, setCurrentTime] = useState(0)
+ const [duration, setDuration] = useState(0)
+ const [volume, setVolume] = useState(0.8)
+ const [busy, setBusy] = useState(false)
+ const [fullscreen, setFullscreen] = useState(false)
+ const videoRef = useRef<HTMLVideoElement>(null)
+ const localRef = useRef<HTMLVideoElement>(null)
+ const stageRef = useRef<HTMLDivElement>(null)
+ const chatEndRef = useRef<HTMLDivElement>(null)
+ const streamRef = useRef<MediaStream | null>(null)
+ const isRoomHost = room?.owner_id === user?.id
+ const isVideoke = activity.mode === 'videoke'
+ const isHost = cinema ? cinema.host_id === user?.id : room?.owner_id === user?.id
 
-    useEffect(() => {
-        supabase.from('rooms').select('*').eq('id', id).single().then(({ data }) => setRoom(data))
-        supabase.from('room_messages').select('*').eq('room_id', id).order('created_at', { ascending: true }).limit(50).then(({ data }) => setMessages(data || []))
-        supabase.from('cinema_sessions').select('*').eq('room_id', id).order('created_at', { ascending: false }).limit(1).single().then(({ data }) => { if (data) { setCinema(data); setMode('cinema') } })
-        const channel = supabase.channel(`room-${id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages', filter: `room_id=eq.${id}` }, payload => setMessages(m => [...m, payload.new]))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'cinema_sessions', filter: `room_id=eq.${id}` }, payload => {
-                if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') setCinema(payload.new)
-                if (payload.eventType === 'DELETE') setCinema(null)
-            })
-            .subscribe()
-        return () => { supabase.removeChannel(channel) }
-    }, [id])
-
-    useEffect(() => {
-        if (inCall && videoRef.current && streamRef.current) {
-            videoRef.current.srcObject = streamRef.current
-            videoRef.current.play().catch(() => { })
-        }
-    }, [inCall])
-
-    useEffect(() => {
-        if (cinemaVideoRef.current && cinema) {
-            if (Math.abs(cinemaVideoRef.current.currentTime - cinema.playback_time) > 2) {
-                cinemaVideoRef.current.currentTime = cinema.playback_time
-            }
-            if (cinema.is_playing) cinemaVideoRef.current.play().catch(() => { })
-            else cinemaVideoRef.current.pause()
-        }
-    }, [cinema])
-
-    const sendMessage = async () => {
-        if (!newMsg.trim() || !user || !id) return
-        await supabase.from('room_messages').insert({ room_id: id, user_id: user.id, content: newMsg })
-        setNewMsg('')
+ useEffect(() => {
+  if (!id || !user) return
+  let active = true
+  const load = async () => {
+   const [roomResult, chatResult, cinemaResult] = await Promise.all([
+    supabase.from('rooms').select('*').eq('id', id).single(),
+    supabase.from('room_messages').select('*').eq('room_id', id).not('content', 'like', `${activityPrefix}%`).order('created_at', { ascending: false }).limit(50),
+    supabase.from('cinema_sessions').select('*').eq('room_id', id).limit(1).maybeSingle(),
+   ])
+   if (!active) return
+   if (roomResult.error) setError(roomResult.error.message)
+   else {
+    setRoom(roomResult.data)
+    roomOwnerRef.current = roomResult.data.owner_id
+    const { data: stateMessage, error: stateError } = await supabase.from('room_messages').select('content').eq('room_id', id).eq('user_id', roomResult.data.owner_id).like('content', `${activityPrefix}%`).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (!active) return
+    if (stateError) setError(stateError.message)
+    const state = stateMessage && parseActivity(stateMessage.content)
+    if (state) setActivity(state)
+   }
+   if (chatResult.error) setError(chatResult.error.message)
+   const rows = (chatResult.data || []).reverse()
+   setMessages(previous => [...new Map([...rows, ...previous].map(message => [message.id, message])).values()])
+   if (cinemaResult.error) setError(cinemaResult.error.message)
+   setCinema(cinemaResult.data)
+   setLoading(false)
+   const ids = [...new Set(rows.map(message => message.user_id))]
+   if (ids.length) {
+    const { data } = await supabase.from('profiles').select('*').in('id', ids)
+    if (active && data) setAuthors(previous => ({ ...previous, ...Object.fromEntries(data.map(author => [author.id, author])) }))
+   }
+  }
+  void load()
+  const channel = supabase.channel(`cinema-room-${id}`, { config: { presence: { key: user.id } } })
+   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages', filter: `room_id=eq.${id}` }, async payload => {
+    if (!active) return
+    if (typeof payload.new.content === 'string' && payload.new.content.startsWith(activityPrefix)) {
+     if (payload.new.user_id === roomOwnerRef.current) {
+      const next = parseActivity(payload.new.content)
+      if (next) setActivity(next)
+     }
+     return
     }
+    setMessages(previous => previous.some(message => message.id === payload.new.id) ? previous : [...previous, payload.new])
+    const { data } = await supabase.from('profiles').select('*').eq('id', payload.new.user_id).maybeSingle()
+    if (active && data) setAuthors(previous => ({ ...previous, [data.id]: data }))
+   })
+   .on('postgres_changes', { event: '*', schema: 'public', table: 'cinema_sessions', filter: `room_id=eq.${id}` }, payload => {
+    if (!active) return
+    setCinema(payload.eventType === 'DELETE' ? null : payload.new)
+   })
+   .on('presence', { event: 'sync' }, () => {
+    if (!active) return
+    const people = Object.values(channel.presenceState()).flat() as unknown as Person[]
+    setParticipants([...new Map(people.map(person => [person.id, person])).values()])
+   })
+   .subscribe(async status => {
+    if (status === 'SUBSCRIBED') await channel.track({ id: user.id, username: profile?.username || 'Tambay', display_name: profile?.display_name, avatar_url: profile?.avatar_url || user.user_metadata?.avatar_url })
+   })
+  return () => { active = false; void supabase.removeChannel(channel) }
+ }, [id, user?.id, profile?.username, profile?.display_name, profile?.avatar_url])
 
-    const joinCall = async () => {
-        try { const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); streamRef.current = stream; setInCall(true) } catch (err: any) { alert('Camera: ' + err.message) }
-    }
+ useEffect(() => () => { streamRef.current?.getTracks().forEach(track => track.stop()) }, [])
+ useEffect(() => { if (localRef.current) localRef.current.srcObject = stream }, [stream, camOn, participants.length])
+ useEffect(() => { chatEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [messages.length, tab])
+ useEffect(() => {
+  const sync = () => setFullscreen(Boolean(document.fullscreenElement))
+  document.addEventListener('fullscreenchange', sync)
+  return () => document.removeEventListener('fullscreenchange', sync)
+ }, [])
+ useEffect(() => {
+  const video = videoRef.current
+  if (!video || !cinema) return
+  if (Math.abs(video.currentTime - (cinema.playback_time || 0)) > 2) video.currentTime = cinema.playback_time || 0
+  if (cinema.is_playing) void video.play().catch(() => setError('Click the play button to allow playback in this browser.'))
+  else video.pause()
+ }, [cinema])
+ useEffect(() => { if (videoRef.current) videoRef.current.volume = volume }, [volume, cinema?.video_url])
 
-    const startCinema = async () => {
-        if (!videoUrl.trim() || !user || !id) return
-        const { data } = await supabase.from('cinema_sessions').insert({ room_id: id, host_id: user.id, video_url: videoUrl, is_playing: false, playback_time: 0 }).select().single()
-        if (data) { setCinema(data); setMode('cinema'); setVideoUrl('') }
-    }
-
-    const toggleCinemaPlay = async () => {
-        if (!cinema || !cinemaVideoRef.current) return
-        const newPlaying = !cinema.is_playing
-        const time = cinemaVideoRef.current.currentTime
-        await supabase.from('cinema_sessions').update({ is_playing: newPlaying, playback_time: time, updated_at: new Date().toISOString() }).eq('id', cinema.id)
-    }
-
-    const endCinema = async () => {
-        if (cinema) await supabase.from('cinema_sessions').delete().eq('id', cinema.id)
-        setCinema(null); setMode('call')
-    }
-
-    if (!room) return <div className="p-10 text-center">Loading...</div>
-
-    return (
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1fr_320px] gap-4 p-4">
-            <div className="space-y-4">
-                <div className="bg-white dark:bg-zinc-900 rounded-2xl border p-4 flex justify-between">
-                    <div><h1 className="font-bold">{room.name}</h1><p className="text-xs text-zinc-500">Mode: {mode}</p></div>
-                    <div className="flex gap-2">
-                        <button onClick={() => setMode('call')} className={`px-3 py-1.5 rounded-full text-xs ${mode === 'call' ? 'bg-zinc-900 text-white' : 'bg-zinc-100'}`}>Call</button>
-                        <button onClick={() => setMode('cinema')} className={`px-3 py-1.5 rounded-full text-xs ${mode === 'cinema' ? 'bg-orange-500 text-white' : 'bg-zinc-100'}`}>Cinema</button>
-                    </div>
-                </div>
-
-                {mode === 'call' ? (
-                    <div className="bg-zinc-950 rounded-2xl p-2">
-                        {!inCall ? <div className="aspect-video grid place-items-center text-zinc-400"><button onClick={joinCall} className="px-5 py-2 rounded-full bg-green-600 text-white text-sm">Join Video</button></div> :
-                            <><div className="aspect-video bg-zinc-900 rounded-xl overflow-hidden"><video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} /></div>
-                                <div className="flex justify-center gap-2 mt-2"><button onClick={() => { streamRef.current?.getVideoTracks().forEach(t => t.enabled = !camOn); setCamOn(!camOn) }} className={`p-3 rounded-full ${camOn ? 'bg-zinc-700' : 'bg-red-600'} text-white`}>{camOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}</button><button onClick={() => { streamRef.current?.getTracks().forEach(t => t.stop()); setInCall(false) }} className="p-3 rounded-full bg-red-600 text-white"><PhoneOff className="w-5 h-5" /></button></div></>}
-                    </div>
-                ) : (
-                    <div className="bg-zinc-950 rounded-2xl p-2">
-                        {!cinema ? (
-                            <div className="p-4 space-y-3"><h3 className="text-white text-sm font-semibold">Start Tambay Cinema</h3><input value={videoUrl} onChange={e => setVideoUrl(e.target.value)} placeholder="https://www.w3schools.com/html/mov_bbb.mp4" className="w-full px-3 py-2 rounded-xl bg-zinc-800 text-white text-sm" /><button onClick={startCinema} className="w-full py-2 rounded-xl bg-orange-500 text-white text-sm">Start Cinema</button></div>
-                        ) : (
-                            <><div className="aspect-video bg-black rounded-xl overflow-hidden relative"><video ref={cinemaVideoRef} src={cinema.video_url} className="w-full h-full bg-black" controls playsInline /><div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 bg-black/70 p-2 rounded-full"><button onClick={toggleCinemaPlay} className="p-2 rounded-full bg-white text-black">{cinema.is_playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}</button><button onClick={endCinema} className="px-3 py-1 rounded-full bg-red-600 text-white text-xs">End</button></div></div><p className="text-xs text-zinc-400 text-center mt-2">{cinema.is_playing ? 'Playing' : 'Paused'} • Host synced</p></>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            <div className="bg-white dark:bg-zinc-900 rounded-2xl border flex flex-col h-[600px]">
-                <div className="flex-1 overflow-y-auto p-3 space-y-1">{messages.map(m => <div key={m.id} className="text-sm"><span className="text-xs text-orange-600">{m.user_id.slice(0, 4)}: </span>{m.content}</div>)}</div>
-                <div className="p-3 border-t flex gap-2"><input value={newMsg} onChange={e => setNewMsg(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Message..." className="flex-1 px-3 py-2 rounded-full bg-zinc-100 text-sm" /><button onClick={sendMessage} className="px-4 py-2 rounded-full bg-zinc-900 text-white text-sm">Send</button></div>
-            </div>
-        </div>
-    )
+ const sendMessage = async (event: React.FormEvent) => {
+  event.preventDefault()
+  if (!newMsg.trim() || !user || !id || sending) return
+  setSending(true)
+  const { data, error: sendError } = await supabase.from('room_messages').insert({ room_id: id, user_id: user.id, content: newMsg.trim() }).select().single()
+  setSending(false)
+  if (sendError) { setError(sendError.message); return }
+  if (data) setMessages(previous => previous.some(message => message.id === data.id) ? previous : [...previous, data])
+  setNewMsg('')
+ }
+ const startCinema = async (event: React.FormEvent) => {
+  event.preventDefault()
+  if (!user || !id || busy || !isHost) return
+  try { const url = new URL(videoUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error() }
+  catch { setError('Enter a valid direct video URL, such as an MP4 link.'); return }
+  setBusy(true)
+  const result = cinema
+   ? await supabase.from('cinema_sessions').update({ video_url: videoUrl, is_playing: false, playback_time: 0 }).eq('id', cinema.id).select().single()
+   : await supabase.from('cinema_sessions').insert({ room_id: id, host_id: user.id, video_url: videoUrl, is_playing: false, playback_time: 0 }).select().single()
+  setBusy(false)
+  if (result.error) { setError(result.error.message); return }
+  setCinema(result.data); setVideoUrl(''); setSettingsOpen(false); setError('')
+ }
+ const syncPlayback = async (playing: boolean, time = videoRef.current?.currentTime || 0) => {
+  if (!cinema || !isHost) return
+  const next = { is_playing: playing, playback_time: time, updated_at: new Date().toISOString() }
+  const { error: syncError } = await supabase.from('cinema_sessions').update(next).eq('id', cinema.id)
+  if (syncError) { setError(syncError.message); return }
+  setCinema((previous: any) => ({ ...previous, ...next }))
+ }
+ const saveActivity = async (next: RoomActivity) => {
+  if (!user || !id || !isRoomHost) return false
+  const { error: stateError } = await supabase.from('room_messages').insert({ room_id: id, user_id: user.id, content: activityPrefix + JSON.stringify(next) })
+  if (stateError) { setError(stateError.message); return false }
+  setActivity(next)
+  return true
+ }
+ const changeMode = async (mode: RoomMode) => {
+  if (busy || mode === activity.mode || !isRoomHost) return
+  setBusy(true)
+  if (cinema?.is_playing && isHost) await syncPlayback(false)
+  await saveActivity({ ...activity, mode })
+  setBusy(false)
+ }
+ const addSong = async (event: React.FormEvent) => {
+  event.preventDefault()
+  if (!songTitle.trim() || !songUrl.trim() || !isRoomHost || busy) return
+  const song = { id: crypto.randomUUID(), title: songTitle.trim(), url: songUrl.trim(), singer: singer || profile?.display_name || profile?.username || 'Host' }
+  const next = { ...activity, queue: [...activity.queue, song] }
+  if (!parseActivity(activityPrefix + JSON.stringify(next))) { setError('Use an HTTP(S) video URL. The queue can hold up to 50 songs.'); return }
+  setBusy(true)
+  if (await saveActivity(next)) { setSongTitle(''); setSongUrl('') }
+  setBusy(false)
+ }
+ const playNextSong = async () => {
+  const song = activity.queue[0]
+  if (!song || busy || !isRoomHost || !user || !id) return
+  setBusy(true)
+  const media = { video_url: song.url, is_playing: false, playback_time: 0 }
+  const result = cinema
+   ? await supabase.from('cinema_sessions').update(media).eq('id', cinema.id).select().single()
+   : await supabase.from('cinema_sessions').insert({ ...media, room_id: id, host_id: user.id }).select().single()
+  if (result.error) setError(result.error.message)
+  else {
+   setCinema(result.data)
+   await saveActivity({ ...activity, singing: `${song.singer} - ${song.title}`, queue: activity.queue.slice(1) })
+  }
+  setBusy(false)
+ }
+ const removeSong = async (songId: string) => {
+  if (busy || !isRoomHost) return
+  setBusy(true)
+  await saveActivity({ ...activity, queue: activity.queue.filter(song => song.id !== songId) })
+  setBusy(false)
+ }
+ const toggleCamera = async () => {
+  if (stream) { const next = !camOn; stream.getVideoTracks().forEach(track => { track.enabled = next }); setCamOn(next); return }
+  try {
+   const media = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+   media.getAudioTracks().forEach(track => { track.enabled = false })
+   streamRef.current = media; setStream(media); setCamOn(true)
+  } catch (cameraError) { setError(cameraError instanceof Error ? cameraError.message : 'Camera is unavailable.') }
+ }
+ const toggleMic = () => {
+  if (!stream) { setError('Enable your camera first to access the local microphone.'); return }
+  stream.getAudioTracks().forEach(track => { track.enabled = !micOn }); setMicOn(!micOn)
+ }
+ const toggleFullscreen = async () => {
+  try { if (document.fullscreenElement) await document.exitFullscreen(); else await stageRef.current?.requestFullscreen() }
+  catch { setError('Fullscreen is unavailable in this browser.') }
+ }
+ const me: Person = { id: user?.id || 'me', username: profile?.username || 'You', display_name: profile?.display_name || undefined, avatar_url: profile?.avatar_url || user?.user_metadata?.avatar_url }
+ const people = participants.length ? participants : [me]
+ const slots: (Person | null)[] = [...people, ...Array(Math.max(0, 8 - people.length)).fill(null)]
+ const tile = (person: Person | null, index: number) => <div className={`cinema-person ${!person ? 'empty-seat' : ''}`} key={person?.id || `seat-${index}`}>
+  {person ? <>{person.id === user?.id && camOn ? <video ref={localRef} autoPlay muted playsInline className="local-camera"/> : <div className="participant-portrait">{person.avatar_url ? <img src={person.avatar_url} alt={person.display_name || person.username}/> : <Avatar name={person.display_name || person.username}/>}</div>}<span className="person-label"><i/>{person.id === user?.id ? 'You' : person.display_name || person.username}<MicOff size={12}/></span></> : <><Armchair size={24}/><small>Seat available</small></>}
+ </div>
+ if (loading) return <div className="cinema-loading"><Clapperboard/><p>Getting the room ready...</p></div>
+ if (!room) return <div className="cinema-loading"><p>{error || 'Room not found.'}</p><Link to="/my-tambayan">Back to rooms</Link></div>
+ return <div className={`cinema-room ${isVideoke ? 'videoke-mode' : ''}`} ref={stageRef}>
+  <div className="cinema-architecture" aria-hidden="true"><i/><i/><i/></div>
+  <header className="cinema-header"><div className="cinema-room-title"><span className="cinema-room-icon"><Clapperboard size={21}/></span><div><h1>{room.name}</h1><p>{people.length} {isVideoke ? 'in videoke' : 'watching'} <span>&middot;</span> {cinema ? formatTime(currentTime) : 'Make yourself at home'}</p></div></div><div className="room-mode-switch" aria-label="Room mode"><button disabled={!isRoomHost || busy} className={!isVideoke?'active':''} onClick={()=>void changeMode('cinema')}><Clapperboard size={14}/> Cinema</button><button disabled={!isRoomHost || busy} className={isVideoke?'active':''} onClick={()=>void changeMode('videoke')}><Mic size={14}/> Videoke</button></div><div className="cinema-header-actions"><Link className="leave-room" to="/my-tambayan"><PhoneOff size={15}/> <span>Leave Room</span></Link><button onClick={()=>setTab('people')} aria-label="Show participants"><Users size={19}/></button><button onClick={()=>setSettingsOpen(!settingsOpen)} aria-label="Room settings" aria-expanded={settingsOpen}><Settings2 size={19}/></button><button onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>{fullscreen?<Minimize size={19}/>:<Maximize size={19}/>}</button></div></header>
+  {error && <div className="cinema-error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={14}/></button></div>}
+  <div className="cinema-layout"><section className="cinema-stage" aria-label="Watch room"><div className="cinema-top-row">{slots.slice(0,4).map(tile)}</div><div className="cinema-screen-row"><div className="cinema-side-seats">{slots.slice(4,6).map((person,index)=>tile(person,index+4))}</div><div className="cinema-screen"><div className="movie-viewport">{cinema ? <video ref={videoRef} src={cinema.video_url} playsInline onTimeUpdate={event=>setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={event=>{setDuration(event.currentTarget.duration);event.currentTarget.volume=volume;event.currentTarget.currentTime=cinema.playback_time || 0}} onEnded={()=>{if(isHost)void syncPlayback(false,0)}} onError={()=>setError('This video could not be loaded. Use a direct, publicly accessible video file URL.')}/> : <div className="movie-empty"><span className="movie-empty-icon"><Clapperboard size={38}/></span><span className="cinema-eyebrow">{isVideoke ? 'TAMBAY VIDEOKE' : 'TAMBAY CINEMA'}</span><h2>{isVideoke ? <>Your song.<br/>Your spotlight.</> : <>Good movies.<br/>Better company.</>}</h2><p>{isVideoke ? 'Queue a karaoke video with lyrics and sing along.' : isHost?'Pick a movie, grab your snacks, and settle in.':'Grab your snacks. The host will start the movie soon.'}</p>{isHost&&!isVideoke&&<button className="cinema-primary" onClick={()=>setSettingsOpen(true)}><PlusIcon/> Choose a movie</button>}<span className="empty-caption"><Radio size={12}/> A little closer, even from far away.</span></div>}</div><div className="movie-controls"><button aria-label={cinema?.is_playing?'Pause movie':'Play movie'} disabled={!cinema} onClick={()=>{if(isHost)void syncPlayback(!cinema.is_playing);else void videoRef.current?.play().catch(()=>setError('Playback could not start.'))}}>{cinema?.is_playing?<Pause size={18}/>:<Play size={18}/>}</button><span className="movie-time">{formatTime(currentTime)} <i>/ {formatTime(duration)}</i></span><input className="movie-progress" aria-label="Movie progress" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime,duration || 1)} disabled={!cinema||!isHost} onChange={event=>{const time=Number(event.target.value);if(videoRef.current)videoRef.current.currentTime=time;setCurrentTime(time);void syncPlayback(cinema.is_playing,time)}}/><button aria-label={volume?'Mute movie':'Unmute movie'} onClick={()=>setVolume(volume?0:0.8)}>{volume?<Volume2 size={16}/>:<VolumeX size={16}/>}</button><input className="movie-volume" aria-label="Movie volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event=>setVolume(Number(event.target.value))}/><button onClick={toggleFullscreen} aria-label="Expand cinema"><Maximize size={16}/></button></div><div className="screen-glow"/></div><div className="cinema-side-seats">{slots.slice(6,8).map((person,index)=>tile(person,index+6))}</div></div><footer className="cinema-stage-footer"><span><i/>{cinema?'Host-synced playback':'Your next movie night starts here'}</span><div><button onClick={toggleCamera} aria-label={camOn?'Disable local camera':'Enable local camera'} className={camOn?'enabled':''}>{camOn?<Video size={17}/>:<VideoOff size={17}/>}</button><button onClick={toggleMic} aria-label={micOn?'Mute local microphone':'Unmute local microphone'} className={micOn?'enabled':''}>{micOn?<Mic size={17}/>:<MicOff size={17}/>}</button></div><small>Local camera preview</small></footer>
+  {isVideoke&&<section className="videoke-queue"><div className="queue-heading"><div><span className="cinema-eyebrow">PASS THE MIC</span><h2><ListMusic size={19}/> Song queue <small>({activity.queue.length})</small></h2></div><button className="cinema-primary" onClick={playNextSong} disabled={!isRoomHost||busy||!activity.queue.length}><SkipForward size={15}/> Next singer</button></div>{activity.singing&&<p className="now-singing"><Mic size={14}/> Now on stage: {activity.singing}</p>}<ol>{activity.queue.map((song,index)=><li key={song.id}><span className="queue-number">{index+1}</span><div><strong>{song.title}</strong><small>{song.singer}</small></div>{isRoomHost&&<button disabled={busy} onClick={()=>void removeSong(song.id)} aria-label={`Remove ${song.title}`}><X size={15}/></button>}</li>)}</ol>{!activity.queue.length&&<p className="queue-empty">No songs queued yet. Ask the host to add your song.</p>}{isRoomHost&&<form className="queue-form" onSubmit={addSong}><input aria-label="Song title" placeholder="Song title" value={songTitle} onChange={event=>setSongTitle(event.target.value)} required maxLength={120}/><input aria-label="Karaoke video URL" placeholder="Direct karaoke video URL with lyrics" value={songUrl} onChange={event=>setSongUrl(event.target.value)} type="url" required/><select aria-label="Singer" value={singer} onChange={event=>setSinger(event.target.value)}><option value="">Choose singer (default: host)</option>{people.map(person=><option key={person.id} value={person.display_name||person.username}>{person.display_name||person.username}</option>)}</select><button className="cinema-primary" disabled={busy}><Plus size={14}/> Add song</button></form>}<p className="videoke-audio-note">Use karaoke videos with on-screen lyrics. Microphone preview stays local; shared live vocals are not connected yet.</p></section>}
+  </section>
+  <aside className="cinema-chat"><div className="cinema-chat-tabs"><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={14}/> Chat</button><button className={tab==='people'?'active':''} onClick={()=>setTab('people')}>Participants <span>({people.length})</span></button></div>{tab==='chat'?<><div className="cinema-messages">{messages.length===0&&<div className="cinema-chat-empty"><MessageCircle size={25}/><p>The best part is watching together.</p><small>Say hello to your room.</small></div>}{messages.map(message=>{const author=message.user_id===user?.id?me:authors[message.user_id];return <div className="cinema-message" key={message.id}><Avatar src={author?.avatar_url} name={author?.display_name||author?.username||'Tambay'}/><div><div className="chat-author">{author?.display_name||author?.username||'Tambay'}<time>{new Date(message.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div><p>{message.content}</p></div></div>})}<div ref={chatEndRef}/></div><form onSubmit={sendMessage} className="cinema-chat-input"><input value={newMsg} onChange={event=>setNewMsg(event.target.value)} placeholder="Type a message..." aria-label="Room message" maxLength={2000}/><button type="submit" disabled={sending||!newMsg.trim()} aria-label="Send message"><Send size={17}/></button></form></>:<div className="cinema-people-list">{people.map(person=><div key={person.id}><Avatar src={person.avatar_url} name={person.display_name||person.username}/><span>{person.display_name||person.username}<small>In the room</small></span><i/></div>)}<p>Camera tiles show profile photos. Live video sharing is not connected yet.</p></div>}</aside></div>
+  {settingsOpen&&<div className="cinema-modal-backdrop"><section className="cinema-settings" role="dialog" aria-modal="true" aria-labelledby="cinema-settings-title"><button className="close-settings" onClick={()=>setSettingsOpen(false)} aria-label="Close settings"><X size={20}/></button><Clapperboard size={28}/><h2 id="cinema-settings-title">Set the mood.</h2><p>{isHost?'Add a direct video link for everyone to watch.':'The host controls the movie and shared playback.'}</p>{isHost&&<form onSubmit={startCinema}><label htmlFor="cinema-url"><Link2 size={14}/> {isVideoke ? 'Karaoke video URL' : 'Movie URL'}</label><input id="cinema-url" type="url" required value={videoUrl} onChange={event=>setVideoUrl(event.target.value)} placeholder="https://example.com/movie.mp4"/><small>Direct MP4 / WebM links. YouTube and streaming page URLs are not supported.</small><button className="cinema-primary" disabled={busy}>{busy?'Loading...':isVideoke?'Load karaoke video':cinema?'Change movie':'Start movie night'}</button></form>}<p className="cinema-privacy-note">Your camera stays off until you enable it.</p></section></div>}
+ </div>
 }
-
+function PlusIcon(){return <Play size={14} fill="currentColor"/>}

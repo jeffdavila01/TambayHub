@@ -5,6 +5,7 @@ import type { User, Session } from '@supabase/supabase-js'
 
 interface Profile {
     id: string
+    display_name?: string | null
     username: string | null
     avatar_url: string | null
     cover_url: string | null
@@ -16,6 +17,7 @@ interface AuthContextType {
     session: Session | null
     profile: Profile | null
     loading: boolean
+    refreshProfile: () => Promise<void>
     signOut: () => Promise<void>
 }
 
@@ -24,6 +26,7 @@ const AuthContext = createContext<AuthContextType>({
     session: null,
     profile: null,
     loading: true,
+    refreshProfile: async () => { },
     signOut: async () => { }
 })
 
@@ -48,7 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
             setSession(sess)
             setUser(sess?.user ?? null)
-            if (sess?.user) fetchProfile(sess.user.id)
+            // Run database queries after the auth callback releases its session lock.
+            if (sess?.user) setTimeout(() => { void fetchProfile(sess.user.id) }, 0)
             else setProfile(null)
             setLoading(false)
         })
@@ -60,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null)
     }
 
-    return <AuthContext.Provider value={{ user, session, profile, loading, signOut }}>{children}</AuthContext.Provider>
+    return <AuthContext.Provider value={{ user, session, profile, loading, signOut, refreshProfile: async () => { if (user) await fetchProfile(user.id) } }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => useContext(AuthContext)

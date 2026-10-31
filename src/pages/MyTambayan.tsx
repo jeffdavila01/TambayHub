@@ -44,10 +44,11 @@ export default function MyTambayan() {
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <div className="flex justify-between items-center">
-                <h1 className="text-xl font-bold">My Tambayan Rooms</h1>
+                <h1 className="text-xl font-bold">Tambay Rooms</h1>
                 <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500 text-white text-sm font-medium"><Plus className="w-4 h-4" /> Create Tambayan</button>
             </div>
 
+            <p className="text-sm text-zinc-500">Movie night or kantahan? One room, same barkada. The host can switch between Cinema and Videoke.</p>
             {showCreate && (
                 <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border dark:border-zinc-800 space-y-3">
                     <input value={name} onChange={e => setName(e.target.value)} placeholder="Tambayan name (e.g. Barkada Gaming)" className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm outline-none" />
@@ -63,7 +64,7 @@ export default function MyTambayan() {
                         <div key={r.id} className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border dark:border-zinc-800">
                             <h3 className="font-bold">{r.name}</h3><p className="text-xs text-zinc-500 mt-1">{r.description}</p>
                             <div className="flex items-center gap-2 mt-3 text-xs text-zinc-500"><Users className="w-3 h-3" /> Invite: {r.invite_code}</div>
-                            <button onClick={() => nav(`/room/${r.id}`)} className="mt-3 w-full py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-black text-sm">Enter Tambayan</button>
+                            <button onClick={() => nav(`/room/${r.id}`)} className="mt-3 w-full py-2 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-black text-sm">Enter Tambay Room</button>
                         </div>
                     ))}
                 </div>

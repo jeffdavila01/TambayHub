@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../services/supabase'
 
 export default function Profile() {
-    const { user } = useAuth()
+    const { user, refreshProfile } = useAuth()
     const [profile, setProfile] = useState<any>(null)
     const [username, setUsername] = useState('')
     const [bio, setBio] = useState('')
@@ -28,6 +28,7 @@ export default function Profile() {
     const handleSave = async () => {
         setSaving(true); setMsg('')
         const { error } = await supabase.from('profiles').update({ username, display_name: displayName, bio, updated_at: new Date().toISOString() }).eq('id', user!.id)
+        if (!error) await refreshProfile()
         setSaving(false)
         setMsg(error ? error.message : 'Profile updated!')
     }
@@ -38,7 +39,9 @@ export default function Profile() {
         const { error } = await supabase.storage.from('avatars').upload(path, file)
         if (!error) {
             const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-            await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', user.id)
+            const { error: updateError } = await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', user.id)
+            if (updateError) { setMsg(updateError.message); return }
+            await refreshProfile()
             setProfile({ ...profile, avatar_url: data.publicUrl })
             setMsg('Avatar updated!')
         }

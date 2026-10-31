@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { loadFriendships } from '../services/friendships'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Search, Send, MessageCircle } from 'lucide-react'
@@ -27,6 +28,7 @@ export default function Messages() {
     const [newMessage, setNewMessage] = useState('')
     const [friends, setFriends] = useState<Profile[]>([])
     const [searchQuery, setSearchQuery] = useState('')
+    const [error, setError] = useState('')
 
     const fetchConversations = async () => {
         if (!user) return
@@ -41,21 +43,28 @@ export default function Messages() {
 
     const fetchFriends = async () => {
         if (!user) return
-        const { data } = await supabase.from('friendships').select('requester:requester_id(id, username, avatar_url), receiver:receiver_id(id, username, avatar_url), requester_id, receiver_id').or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`).eq('status', 'accepted')
-        if (!data) return
-        const friendList: Profile[] = data.map((f: any) => f.requester_id === user.id ? f.receiver : f.requester).filter(Boolean)
-        setFriends(friendList)
+        try {
+            const rows = await loadFriendships(user.id, 'accepted')
+            const friendList = rows.map(row => row.requester_id === user.id ? row.receiver : row.requester).filter((person): person is Profile => Boolean(person))
+            setFriends([...new Map(friendList.map(person => [person.id, person])).values()])
+            setError('')
+        } catch (err) {
+            setError(`Hindi ma-load ang friends: ${err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Please try again.'}`)
+        }
     }
 
     const fetchMessages = async (otherId: string) => {
         if (!user) return
-        const { data } = await supabase.from('direct_messages').select('*, sender:sender_id(username, avatar_url), receiver:receiver_id(username, avatar_url)').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true })
-        if (data) setMessages(data as any)
+        const { data, error: loadError } = await supabase.from('direct_messages').select('*').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true })
+        if (loadError) { setError(loadError.message); return }
+        if (data) setMessages(data)
     }
 
     const sendMessage = async () => {
         if (!newMessage.trim() || !user || !selectedUser) return
-        await supabase.from('direct_messages').insert({ sender_id: user.id, receiver_id: selectedUser.id, content: newMessage.trim() })
+        const { error: sendError } = await supabase.from('direct_messages').insert({ sender_id: user.id, receiver_id: selectedUser.id, content: newMessage.trim() })
+        if (sendError) { setError(sendError.message); return }
+        setError('')
         setNewMessage('')
         fetchMessages(selectedUser.id)
     }
@@ -100,6 +109,7 @@ export default function Messages() {
             </div>
 
             <div className="flex-1 flex flex-col">
+                {error && <p role="alert" className="p-3 text-xs text-red-600">{error}</p>}
                 {!selectedUser ? (
                     <div className="flex-1 grid place-items-center text-zinc-500"><p className="text-sm">Select a conversation</p></div>
                 ) : (

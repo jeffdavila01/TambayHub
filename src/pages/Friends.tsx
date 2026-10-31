@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { loadFriendships } from '../services/friendships'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Search, UserPlus, Check, X, Users } from 'lucide-react'
@@ -19,30 +20,30 @@ interface Friendship {
 }
 
 export default function Friends() {
-    const { user, profile } = useAuth()
+    const { user } = useAuth()
     const [friends, setFriends] = useState<Friendship[]>([])
     const [requests, setRequests] = useState<Friendship[]>([])
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState<Profile[]>([])
+    const [error, setError] = useState('')
     const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'search'>('friends')
 
     const fetchFriends = async () => {
         if (!user) return
-        const { data } = await supabase.from('friendships').select(`
-      *,
-      requester:requester_id (id, username, avatar_url),
-      receiver:receiver_id (id, username, avatar_url)
-    `).or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`).eq('status', 'accepted')
-        if (data) setFriends(data as any)
+        try {
+            setFriends(await loadFriendships(user.id, 'accepted'))
+        } catch (err) {
+            setError(err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Unable to load friends.')
+        }
     }
 
     const fetchRequests = async () => {
         if (!user) return
-        const { data } = await supabase.from('friendships').select(`
-      *,
-      requester:requester_id (id, username, avatar_url)
-    `).eq('receiver_id', user.id).eq('status', 'pending')
-        if (data) setRequests(data as any)
+        try {
+            setRequests(await loadFriendships(user.id, 'pending'))
+        } catch (err) {
+            setError(err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Unable to load requests.')
+        }
     }
 
     const searchUsers = async (query: string) => {
@@ -86,6 +87,7 @@ export default function Friends() {
         <div className="max-w-3xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold flex items-center gap-2"><Users className="w-6 h-6" /> Friends</h1>
 
+            {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
             <div className="flex gap-2 border-b">
                 <button onClick={() => setActiveTab('friends')} className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === 'friends' ? 'border-orange-500 text-orange-600' : 'border-transparent'}`}>My Friends ({friends.length})</button>
                 <button onClick={() => setActiveTab('requests')} className={`px-4 py-2 text-sm font-medium border-b-2 ${activeTab === 'requests' ? 'border-orange-500 text-orange-600' : 'border-transparent'}`}>Requests ({requests.length})</button>
