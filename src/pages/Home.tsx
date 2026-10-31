@@ -9,11 +9,18 @@ export default function Home() {
 
   const fetchPosts = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(20)
+    const { data, error } = await supabase.from('posts').select(`
+  *,
+  profiles (
+    username,
+    avatar_url
+  )
+`).order('created_at', { ascending: false })
     if (error) console.error(error)
     setPosts(data || [])
     setLoading(false)
   }
+
 
   useEffect(() => { fetchPosts() }, [])
 
