@@ -13,7 +13,7 @@ export default function Settings() {
     return (
         <div className="max-w-2xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold">Settings</h1>
-            {isAdmin&&<Link to="/admin/media" className="purple-button">Open media dashboard</Link>}
+            {isAdmin&&<Link to="/admin" className="purple-button">Open dashboard</Link>}
 
             <div className="bg-white dark:bg-zinc-900 rounded-2xl border p-4 space-y-4">
                 <div className="flex items-center gap-3">
