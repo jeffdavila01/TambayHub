@@ -34,3 +34,9 @@ export function mergeMediaSessions(current:Record<MediaMode,MediaSession|null>,r
  }
  return result
 }
+
+export function stopRoomPlayback(media:Pick<HTMLMediaElement,'pause'|'removeAttribute'|'load'>) {
+ media.pause()
+ media.removeAttribute('src')
+ media.load()
+}

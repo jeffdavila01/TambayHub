@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath, nextSongPlayback, mediaPlaybackSource, mergeMediaSessions } from '../src/services/roomMedia.ts'
+import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath, nextSongPlayback, mediaPlaybackSource, mergeMediaSessions, stopRoomPlayback } from '../src/services/roomMedia.ts'
 import { normalizeMediaUrl } from '../src/services/mediaSource.ts'
 import { parseActivity, activityPrefix } from '../src/services/roomActivity.ts'
 test('Cinema and Videoke sources and positions stay separate',()=>{
@@ -53,5 +53,16 @@ test('late database snapshots cannot pause or replace a newer queued song',()=>{
   assert.equal(merged[mode],current)
   const pause={...current,is_playing:false,updated_at:new Date(now+1000).toISOString()}
   assert.equal(mergeMediaSessions(merged,[pause])[mode],pause)
+ }
+})
+
+test('leaving releases local audio/video without changing the room session',()=>{
+ const room={is_playing:true,playback_time:42}
+ for(const kind of ['audio','video']){
+  const calls=[]
+  const element={pause:()=>calls.push('pause'),removeAttribute:name=>calls.push('remove:'+name),load:()=>calls.push('load')}
+  stopRoomPlayback(element)
+  assert.deepEqual(calls,['pause','remove:src','load'],kind)
+  assert.deepEqual(room,{is_playing:true,playback_time:42})
  }
 })

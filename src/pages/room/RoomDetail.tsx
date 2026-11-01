@@ -11,7 +11,7 @@ import RemoteVideo from '../../components/rooms/RemoteVideo'
 import InviteFriends from '../../components/rooms/InviteFriends'
 import { inviteLink } from '../../services/roomInvites'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../services/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { activityPrefix, initialActivity, parseActivity, type RoomActivity, type RoomMode } from '../../services/roomActivity'
@@ -23,6 +23,9 @@ const formatTime = formatPlaybackTime
 
 export default function RoomDetail() {
  const { id } = useParams()
+ const navigate=useNavigate()
+ const [leaving,setLeaving]=useState(false)
+ const [hostId,setHostId]=useState<string|null>(null)
  const { user, profile } = useAuth()
  const seat = useRoomSeat(id, user?.id)
  const [activity, setActivity] = useState<RoomActivity>(initialActivity)
@@ -62,10 +65,11 @@ export default function RoomDetail() {
  const chatEndRef = useRef<HTMLDivElement>(null)
  const streamRef = useRef<MediaStream | null>(null)
  const [mediaPending, setMediaPending] = useState(false)
- const { remoteMedia, callError, ready: callReady } = useRoomCall({ roomId: seat.admitted ? room?.id : undefined, userId: user?.id, stream, camOn, micOn })
- const isRoomHost = room?.owner_id === user?.id
+ const { remoteMedia, callError, ready: callReady } = useRoomCall({ roomId: seat.admitted && !leaving ? room?.id : undefined, userId: user?.id, stream, camOn, micOn })
+ const isRoomHost = hostId === user?.id
  const isVideoke = activity.mode === 'videoke'
- const isHost = cinema ? cinema.host_id === user?.id : room?.owner_id === user?.id
+ const isHost = isRoomHost
+ useEffect(()=>{if(seat.hostId!==undefined)setHostId(seat.hostId)},[seat.hostId])
 
  useEffect(() => {
   if (!id || !user || !seat.admitted) return
@@ -101,6 +105,7 @@ export default function RoomDetail() {
   }
   void load()
   const channel = supabase.channel(`cinema-room-${id}`, { config: { presence: { key: user.id } } })
+   .on('postgres_changes',{event:'*',schema:'public',table:'room_hosts',filter:`room_id=eq.${id}`},payload=>{if(active&&payload.eventType!=='DELETE')setHostId(payload.new.host_id)})
    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages', filter: `room_id=eq.${id}` }, async payload => {
     if (!active) return
     if (typeof payload.new.content === 'string' && payload.new.content.startsWith(activityPrefix)) {
@@ -148,6 +153,8 @@ export default function RoomDetail() {
   if (!id) return
   let active = true
   const refresh = async () => {
+   const { data:host }=await supabase.from('room_hosts').select('host_id').eq('room_id',id).maybeSingle()
+   if(active&&host)setHostId(host.host_id)
    const { data, error: refreshError } = await supabase.from('room_media_sessions').select('*').eq('room_id', id)
    if (active && !refreshError) setMediaSessions(previous=>mergeMediaSessions(previous,data || []))
   }
@@ -197,7 +204,7 @@ export default function RoomDetail() {
  }
  const saveActivity = async (next: RoomActivity) => {
   if (!user || !id || !isRoomHost) return false
-  const { error: stateError } = await supabase.from('room_messages').insert({ room_id: id, user_id: user.id, content: activityPrefix + JSON.stringify(next) })
+  const { error: stateError } = await supabase.rpc('save_room_activity',{p_room_id:id,p_state:next})
   if (stateError) { setError(stateError.message); return false }
   setActivity(next)
   return true
@@ -285,6 +292,23 @@ export default function RoomDetail() {
   try { await navigator.clipboard.writeText(inviteLink(room.invite_code, window.location.origin)); setInviteNotice('Invite link copied. Send it to your friend.'); }
   catch { setError('Unable to copy the invite. Use the code on your room card instead.') }
  }
+ const leaveRoom = async () => {
+  if(leaving)return
+  videoRef.current?.pause()
+  streamRef.current?.getTracks().forEach(track=>track.stop())
+  setLeaving(true)
+  try {await seat.leave()}
+  catch { /* Disconnected seats expire; leaving must still stop local playback. */ }
+  finally {navigate('/my-tambayan')}
+ }
+ const passHost = async (target:Person) => {
+  if(!id||!isRoomHost||busy||target.id===user?.id)return
+  setBusy(true)
+  const {data,error}=await supabase.rpc('transfer_room_host',{p_room_id:id,p_user_id:target.id})
+  if(error)setError(error.message)
+  else {setHostId(data);setInviteNotice(`Hosting passed to ${target.display_name||target.username}.`)}
+  setBusy(false)
+ }
  const toggleFullscreen = async () => {
   try { if (document.fullscreenElement) await document.exitFullscreen(); else await stageRef.current?.requestFullscreen() }
   catch { setError('Fullscreen is unavailable in this browser.') }
@@ -296,12 +320,13 @@ export default function RoomDetail() {
   {person ? <>{person.id !== user?.id && remoteMedia[person.id] && <RemoteVideo media={remoteMedia[person.id]} name={person.display_name || person.username}/>}
   {person.id === user?.id && camOn ? <video ref={localRef} autoPlay muted playsInline className="local-camera"/> : <div className={`participant-portrait ${person.id !== user?.id && remoteMedia[person.id]?.camOn && remoteMedia[person.id]?.connected ? 'portrait-hidden' : ''}`}>{person.avatar_url ? <img src={person.avatar_url} alt={person.display_name || person.username}/> : <Avatar name={person.display_name || person.username}/>}</div>}<span className="person-label"><i/>{person.id === user?.id ? 'You' : person.display_name || person.username}{(person.id === user?.id ? micOn : remoteMedia[person.id]?.micOn) ? <Mic size={12}/> : <MicOff size={12}/>}</span></> : <><Armchair size={24}/><small>Seat available</small></>}
  </div>
+ if(leaving)return <div className="cinema-loading"><p>Leaving room...</p></div>
  if (!seat.loading && !seat.admitted) return <div className="cinema-loading"><Users size={30}/><h1>Unable to enter room</h1><p role="alert">{seat.error}</p><button className="cinema-primary" onClick={seat.retry}>Try again</button><Link to="/my-tambayan">Back to rooms</Link></div>
  if (loading || seat.loading) return <div className="cinema-loading"><Clapperboard/><p>Getting the room ready...</p></div>
  if (!room) return <div className="cinema-loading"><p>{error || 'Room not found.'}</p><Link to="/my-tambayan">Back to rooms</Link></div>
  return <div className={`cinema-room ${isVideoke ? 'videoke-mode' : ''}`} ref={stageRef}>
   <div className="cinema-architecture" aria-hidden="true"><i/><i/><i/></div>
-  <header className="cinema-header"><div className="cinema-room-title"><span className="cinema-room-icon"><Clapperboard size={21}/></span><div><h1>{room.name}</h1><p>{seat.count}/{seat.capacity} in room <span>&middot;</span> {cinema ? formatTime(currentTime) : 'Make yourself at home'}</p></div></div><div className="room-mode-switch" aria-label="Room mode"><button disabled={!isRoomHost || busy} className={!isVideoke?'active':''} onClick={()=>void changeMode('cinema')}><Clapperboard size={14}/> Cinema</button><button disabled={!isRoomHost || busy} className={isVideoke?'active':''} onClick={()=>void changeMode('videoke')}><Mic size={14}/> Videoke</button></div><div className="cinema-header-actions"><button className="invite-friends-trigger" onClick={()=>setInviteFriendsOpen(true)} aria-label="Invite friends to room"><UserPlus size={17}/><span>Invite friends</span></button><button onClick={copyRoomInvite} aria-label="Copy room invite link" title="Copy invite link"><Link2 size={19}/></button><Link className="leave-room" to="/my-tambayan"><PhoneOff size={15}/> <span>Leave Room</span></Link><button onClick={()=>setTab('people')} aria-label="Show participants"><Users size={19}/></button><button onClick={()=>setSettingsOpen(!settingsOpen)} aria-label="Room settings" aria-expanded={settingsOpen}><Settings2 size={19}/></button><button onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>{fullscreen?<Minimize size={19}/>:<Maximize size={19}/>}</button></div></header>
+  <header className="cinema-header"><div className="cinema-room-title"><span className="cinema-room-icon"><Clapperboard size={21}/></span><div><h1>{room.name}</h1><p>{seat.count}/{seat.capacity} in room <span>&middot;</span> {cinema ? formatTime(currentTime) : 'Make yourself at home'}</p></div></div><div className="room-mode-switch" aria-label="Room mode"><button disabled={!isRoomHost || busy} className={!isVideoke?'active':''} onClick={()=>void changeMode('cinema')}><Clapperboard size={14}/> Cinema</button><button disabled={!isRoomHost || busy} className={isVideoke?'active':''} onClick={()=>void changeMode('videoke')}><Mic size={14}/> Videoke</button></div><div className="cinema-header-actions"><button className="invite-friends-trigger" onClick={()=>setInviteFriendsOpen(true)} aria-label="Invite friends to room"><UserPlus size={17}/><span>Invite friends</span></button><button onClick={copyRoomInvite} aria-label="Copy room invite link" title="Copy invite link"><Link2 size={19}/></button><button className="leave-room" onClick={()=>void leaveRoom()} disabled={leaving}><PhoneOff size={15}/> <span>Leave Room</span></button><button onClick={()=>setTab('people')} aria-label="Show participants"><Users size={19}/></button><button onClick={()=>setSettingsOpen(!settingsOpen)} aria-label="Room settings" aria-expanded={settingsOpen}><Settings2 size={19}/></button><button onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>{fullscreen?<Minimize size={19}/>:<Maximize size={19}/>}</button></div></header>
   {inviteNotice&&<div className="cinema-invite-notice" role="status">{inviteNotice}<button onClick={()=>setInviteNotice('')} aria-label="Dismiss invite notice"><X size={14}/></button></div>}
   {callError&&<div className="cinema-error" role="status">{callError}</div>}
   {error && <div className="cinema-error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={14}/></button></div>}
@@ -310,7 +335,7 @@ export default function RoomDetail() {
   {isVideoke?<SongLibrary canQueue={seat.admitted} busy={busy} onQueue={enqueueSong}/>:<MovieLibrary busy={busy} onSelect={chooseMovie}/>}
   {isVideoke&&<section className="videoke-queue"><div className="queue-heading"><div><span className="cinema-eyebrow">PASS THE MIC</span><h2><ListMusic size={19}/> Song queue <small>({activity.queue.length})</small></h2></div><button className="cinema-primary" onClick={playNextSong} disabled={!isRoomHost||busy||!activity.queue.length}><SkipForward size={15}/> Next singer</button></div>{activity.singing&&<p className="now-singing"><Mic size={14}/> Now on stage: {activity.singing}</p>}<ol>{activity.queue.map((song,index)=><li key={song.id}><span className="queue-number">{index+1}</span><div><strong>{song.title}</strong><small>{song.singer}</small></div>{isRoomHost&&<button disabled={busy} onClick={()=>void removeSong(song.id)} aria-label={`Remove ${song.title}`}><X size={15}/></button>}</li>)}</ol>{!activity.queue.length&&<p className="queue-empty">No songs queued yet. Ask the host to add your song.</p>}<p className="videoke-audio-note">Pick YouTube karaoke or direct videos with on-screen lyrics. Unmute your microphone to sing for the room. Headphones help prevent echo.</p></section>}
   </section>
-  <aside className="cinema-chat"><div className="cinema-chat-tabs"><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={14}/> Chat</button><button className={tab==='people'?'active':''} onClick={()=>setTab('people')}>Participants <span>({people.length}/{seat.capacity})</span></button></div>{tab==='chat'?<><div className="cinema-messages">{messages.length===0&&<div className="cinema-chat-empty"><MessageCircle size={25}/><p>The best part is watching together.</p><small>Say hello to your room.</small></div>}{messages.map(message=>{const author=message.user_id===user?.id?me:authors[message.user_id];return <div className="cinema-message" key={message.id}><Avatar src={author?.avatar_url} name={author?.display_name||author?.username||'Tambay'}/><div><div className="chat-author">{author?.display_name||author?.username||'Tambay'}<time>{new Date(message.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div><p>{message.content}</p></div></div>})}<div ref={chatEndRef}/></div><form onSubmit={sendMessage} className="cinema-chat-input"><input value={newMsg} onChange={event=>setNewMsg(event.target.value)} placeholder="Type a message..." aria-label="Room message" maxLength={2000}/><button type="submit" disabled={sending||!newMsg.trim()} aria-label="Send message"><Send size={17}/></button></form></>:<div className="cinema-people-list">{people.map(person=><div key={person.id}><Avatar src={person.avatar_url} name={person.display_name||person.username}/><span>{person.display_name||person.username}<small>In the room</small></span><i/></div>)}<p>Enable your camera and microphone to join the live call. They start off for everyone.</p></div>}</aside></div>
+  <aside className="cinema-chat"><div className="cinema-chat-tabs"><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={14}/> Chat</button><button className={tab==='people'?'active':''} onClick={()=>setTab('people')}>Participants <span>({people.length}/{seat.capacity})</span></button></div>{tab==='chat'?<><div className="cinema-messages">{messages.length===0&&<div className="cinema-chat-empty"><MessageCircle size={25}/><p>The best part is watching together.</p><small>Say hello to your room.</small></div>}{messages.map(message=>{const author=message.user_id===user?.id?me:authors[message.user_id];return <div className="cinema-message" key={message.id}><Avatar src={author?.avatar_url} name={author?.display_name||author?.username||'Tambay'}/><div><div className="chat-author">{author?.display_name||author?.username||'Tambay'}<time>{new Date(message.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div><p>{message.content}</p></div></div>})}<div ref={chatEndRef}/></div><form onSubmit={sendMessage} className="cinema-chat-input"><input value={newMsg} onChange={event=>setNewMsg(event.target.value)} placeholder="Type a message..." aria-label="Room message" maxLength={2000}/><button type="submit" disabled={sending||!newMsg.trim()} aria-label="Send message"><Send size={17}/></button></form></>:<div className="cinema-people-list">{people.map(person=><div key={person.id}><Avatar src={person.avatar_url} name={person.display_name||person.username}/><span>{person.display_name||person.username}<small>{person.id===hostId?'Room host':'In the room'}</small></span>{isRoomHost&&person.id!==user?.id?<button className="pass-host-button" disabled={busy} onClick={()=>void passHost(person)}>Make host</button>:<i/>}</div>)}<p>Enable your camera and microphone to join the live call. They start off for everyone.</p></div>}</aside></div>
   {inviteFriendsOpen&&<InviteFriends roomId={room.id} roomName={room.name} onClose={()=>setInviteFriendsOpen(false)}/>}
   {settingsOpen&&<div className="cinema-modal-backdrop"><section className="cinema-settings" role="dialog" aria-modal="true" aria-labelledby="cinema-settings-title"><button className="close-settings" onClick={()=>setSettingsOpen(false)} aria-label="Close settings"><X size={20}/></button><Clapperboard size={28}/><h2 id="cinema-settings-title">Room media</h2><p>Choose movies and music from the catalog below the player. The room host controls playback and the next singer.</p>{isAdmin&&<Link to="/admin/media" className="cinema-primary">Manage music & movies</Link>}<p className="cinema-privacy-note">Your camera stays off until you enable it.</p></section></div>}
  </div>

@@ -1,6 +1,6 @@
 import { Music2 } from 'lucide-react'
 import { supabase } from '../../services/supabase'
-import { storedAudioPath } from '../../services/roomMedia'
+import { storedAudioPath, stopRoomPlayback } from '../../services/roomMedia'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { youtubeVideoId } from '../../services/mediaSource'
 import { playbackPosition, youtubePlaybackReport, type PlaybackSnapshot } from '../../services/playbackClock'
@@ -62,6 +62,17 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',visible)}
  },[source,audioPath])
  const driver=useRef<RoomMediaHandle|null>(null)
+ useEffect(()=>{
+  if(youtubeId)return
+  const media=videoRef.current
+  if(!media)return
+  if(media.getAttribute('src')!==playableUrl){media.src=playableUrl;media.load()}
+  driver.current=media
+  return()=>{
+   stopRoomPlayback(media)
+   if(driver.current===media)driver.current=null
+  }
+ },[youtubeId,playableUrl])
  useImperativeHandle(ref,()=>({
   get currentTime(){return driver.current?.currentTime||0},set currentTime(value){if(driver.current)driver.current.currentTime=value},
   get duration(){return driver.current?.duration||0},set duration(_value){},
@@ -72,7 +83,7 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   play:()=>driver.current?.play()||Promise.resolve(),pause:()=>driver.current?.pause(),
  }),[])
  useEffect(()=>{
-  if(!youtubeId){driver.current=videoRef.current;return}
+  if(!youtubeId){return}
   let active=true
   let player:YoutubePlayer|null=null
   const mount=mountRef.current
