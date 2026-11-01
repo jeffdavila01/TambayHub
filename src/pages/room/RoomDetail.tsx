@@ -1,7 +1,9 @@
-import { mapMediaSessions, mergeMediaSessions, mediaPlaybackSource, nextSongPlayback, type MediaSession } from '../../services/roomMedia'
+import { mapMediaSessions, mergeMediaSessions, nextSongPlayback, type MediaSession } from '../../services/roomMedia'
+import { useMediaAdmin } from '../../hooks/useMediaAdmin'
+import MovieLibrary from '../../components/rooms/MovieLibrary'
 import SongLibrary from '../../components/rooms/SongLibrary'
 import RoomMediaPlayer, { type RoomMediaHandle } from '../../components/rooms/RoomMediaPlayer'
-import { normalizeMediaUrl, youtubeVideoId } from '../../services/mediaSource'
+import { youtubeVideoId } from '../../services/mediaSource'
 import { useRoomSeat } from '../../hooks/useRoomSeat'
 import { formatPlaybackTime } from '../../services/playbackClock'
 import { useRoomCall } from '../../hooks/useRoomCall'
@@ -14,7 +16,7 @@ import { supabase } from '../../services/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { activityPrefix, initialActivity, parseActivity, type RoomActivity, type RoomMode } from '../../services/roomActivity'
 import Avatar from '../../components/ui/Avatar'
-import { Clapperboard, Users, Settings2, Maximize, Minimize, PhoneOff, Video, VideoOff, Mic, MicOff, Send, MessageCircle, Play, Pause, Volume2, VolumeX, Link2, X, Armchair, Radio, ListMusic, SkipForward, Plus, UserPlus } from 'lucide-react'
+import { Clapperboard, Users, Settings2, Maximize, Minimize, PhoneOff, Video, VideoOff, Mic, MicOff, Send, MessageCircle, Play, Pause, Volume2, VolumeX, Link2, X, Armchair, Radio, ListMusic, SkipForward, UserPlus } from 'lucide-react'
 
 type Person = { id: string, username: string, display_name?: string, avatar_url?: string }
 const formatTime = formatPlaybackTime
@@ -24,9 +26,7 @@ export default function RoomDetail() {
  const { user, profile } = useAuth()
  const seat = useRoomSeat(id, user?.id)
  const [activity, setActivity] = useState<RoomActivity>(initialActivity)
- const [songTitle, setSongTitle] = useState('')
- const [songUrl, setSongUrl] = useState('')
- const [singer, setSinger] = useState('')
+ const {isAdmin}=useMediaAdmin()
  const roomOwnerRef = useRef<string | null>(null)
  const [room, setRoom] = useState<any>(null)
  const [loading, setLoading] = useState(true)
@@ -43,7 +43,6 @@ export default function RoomDetail() {
   const mode = activity.mode
   setMediaSessions(previous => ({...previous,[mode]:typeof value==='function'?value(previous[mode]):value}))
  }
- const [videoUrl, setVideoUrl] = useState('')
  const [inviteFriendsOpen, setInviteFriendsOpen] = useState(false)
  const [settingsOpen, setSettingsOpen] = useState(false)
  const [tab, setTab] = useState<'chat' | 'people'>('chat')
@@ -178,20 +177,6 @@ export default function RoomDetail() {
   if (data) setMessages(previous => previous.some(message => message.id === data.id) ? previous : [...previous, data])
   setNewMsg('')
  }
- const startCinema = async (event: React.FormEvent) => {
-  event.preventDefault()
-  if (!user || !id || busy || !isHost) return
-  let source: string
-  try { source = normalizeMediaUrl(videoUrl) }
-  catch (err) { setError(err instanceof Error ? err.message : 'Enter a YouTube link or direct video URL.'); return }
-  setBusy(true)
-  const result = cinema
-   ? await supabase.from('room_media_sessions').update(mediaPlaybackSource(source,false)).eq('id', cinema.id).select().single()
-   : await supabase.from('room_media_sessions').insert({ room_id: id, mode: activity.mode, host_id: user.id, ...mediaPlaybackSource(source,false) }).select().single()
-  setBusy(false)
-  if (result.error) { setError(result.error.message); return }
-  setCinema(result.data); setVideoUrl(''); setSettingsOpen(false); setError('')
- }
  const syncPlayback = (playing: boolean, time = videoRef.current?.currentTime || 0): Promise<boolean> => {
   if (!cinema || !isHost || changingSongRef.current) return Promise.resolve(false)
   const sessionId = cinema.id
@@ -222,24 +207,25 @@ export default function RoomDetail() {
   setBusy(true)
   videoRef.current?.pause()
   if (cinema && isHost && !(await syncPlayback(false))) { setBusy(false); return }
-  if (await saveActivity({ ...activity, mode })) { setCurrentTime(0); setDuration(0); setVideoUrl(''); setSettingsOpen(false) }
+  if (await saveActivity({ ...activity, mode })) { setCurrentTime(0); setDuration(0); setSettingsOpen(false) }
   setBusy(false)
  }
- const enqueueSong = async (title: string, url: string) => {
-  if (!title.trim() || !isRoomHost || busy) return
-  let source: string
-  try { source = normalizeMediaUrl(url) }
-  catch (err) { setError(err instanceof Error ? err.message : 'Invalid video URL.'); return }
-  const song = { id: crypto.randomUUID(), title: title.trim(), url: source, singer: singer || profile?.display_name || profile?.username || 'Host' }
-  const next = { ...activity, queue: [...activity.queue, song] }
-  if (!parseActivity(activityPrefix + JSON.stringify(next))) { setError('The queue can hold up to 50 songs.'); return }
-  setBusy(true)
-  if (await saveActivity(next)) { setSongTitle(''); setSongUrl('') }
+ const enqueueSong = async (songId:string) => {
+  if(!id||busy)return
+  setBusy(true);setError('')
+  const {data,error}=await supabase.rpc('queue_catalog_song',{p_room_id:id,p_song_id:songId})
+  if(error)setError(error.message)
+  else {const next=parseActivity(activityPrefix+JSON.stringify(data));if(next)setActivity(next)}
   setBusy(false)
  }
- const addSong = async (event: React.FormEvent) => {
-  event.preventDefault()
-  await enqueueSong(songTitle, songUrl)
+ const chooseMovie = async (movieId:string) => {
+  if(!id||busy)return
+  setBusy(true);setError('')
+  await playbackWritesRef.current
+  const {data,error}=await supabase.rpc('choose_catalog_movie',{p_room_id:id,p_movie_id:movieId})
+  if(error)setError(error.message)
+  else if(data)setMediaSessions(previous=>mergeMediaSessions(previous,[data]))
+  setBusy(false)
  }
  const playNextSong = async () => {
   const song = activity.queue[0]
@@ -321,12 +307,12 @@ export default function RoomDetail() {
   {error && <div className="cinema-error" role="alert">{error}<button onClick={()=>setError('')} aria-label="Dismiss error"><X size={14}/></button></div>}
   <div className="cinema-layout"><section className="cinema-stage" aria-label="Watch room"><div className="cinema-top-row">{slots.slice(0,4).map(tile)}</div><div className="cinema-screen-row"><div className="cinema-side-seats">{slots.slice(4,6).map((person,index)=>tile(person,index+4))}</div><div className="cinema-screen"><div className={`movie-viewport ${youtubeVideoId(cinema?.video_url || '') ? 'youtube-viewport' : ''}`}>{cinema ? <RoomMediaPlayer key={`${activity.mode}:${cinema.id}:${cinema.video_url}`} ref={videoRef} session={cinema} isHost={isHost} volume={volume} onProgress={(time,length)=>{setCurrentTime(time);setDuration(length)}} onHostPlayback={(playing,time)=>{void syncPlayback(playing,time)}} onError={setError}/> : <div className="movie-empty"><span className="movie-empty-icon"><Clapperboard size={38}/></span><span className="cinema-eyebrow">{isVideoke ? 'TAMBAY VIDEOKE' : 'TAMBAY CINEMA'}</span><h2>{isVideoke ? <>Your song.<br/>Your spotlight.</> : <>Good movies.<br/>Better company.</>}</h2><p>{isVideoke ? 'Choose uploaded audio or a karaoke video from the song library.' : isHost?'Pick a movie, grab your snacks, and settle in.':'Grab your snacks. The host will start the movie soon.'}</p>{isHost&&!isVideoke&&<button className="cinema-primary" onClick={()=>setSettingsOpen(true)}><PlusIcon/> Choose a movie</button>}<span className="empty-caption"><Radio size={12}/> A little closer, even from far away.</span></div>}</div><div className="movie-controls"><button aria-label={cinema?.is_playing?'Pause movie':'Play movie'} disabled={!cinema} onClick={()=>{if(isHost)void syncPlayback(!cinema?.is_playing);else void videoRef.current?.play().catch(()=>setError('Playback could not start.'))}}>{cinema?.is_playing?<Pause size={18}/>:<Play size={18}/>}</button><span className="movie-time">{formatTime(currentTime)} <i>/ {formatTime(duration)}</i></span><input className="movie-progress" aria-label="Movie progress" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime,duration || 1)} disabled={!cinema||!isHost} onChange={event=>{const time=Number(event.target.value);if(videoRef.current)videoRef.current.currentTime=time;setCurrentTime(time);void syncPlayback(Boolean(cinema?.is_playing),time)}}/><button aria-label={volume?'Mute movie':'Unmute movie'} onClick={()=>setVolume(volume?0:0.8)}>{volume?<Volume2 size={16}/>:<VolumeX size={16}/>}</button><input className="movie-volume" aria-label="Movie volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event=>setVolume(Number(event.target.value))}/><button onClick={toggleFullscreen} aria-label="Expand cinema"><Maximize size={16}/></button></div><div className="screen-glow"/></div><div className="cinema-side-seats">{slots.slice(6,8).map((person,index)=>tile(person,index+6))}</div></div><footer className="cinema-stage-footer"><span><i/>{cinema?'Host-synced playback':'Your next movie night starts here'}</span><div><button disabled={mediaPending||!callReady} onClick={toggleCamera} aria-label={camOn?'Turn off camera':'Share camera with room'} className={camOn?'enabled':''}>{camOn?<Video size={17}/>:<VideoOff size={17}/>}</button><button disabled={mediaPending||!callReady} onClick={toggleMic} aria-label={micOn?'Mute microphone':'Share microphone with room'} className={micOn?'enabled':''}>{micOn?<Mic size={17}/>:<MicOff size={17}/>}</button></div><small>{callReady ? 'Live room call' : 'Connecting call...'}</small></footer>
   {slots.length>8&&<div className="cinema-extra-participants">{slots.slice(8).map((person,index)=>tile(person,index+8))}</div>}
-  {isVideoke&&<SongLibrary canQueue={isRoomHost} busy={busy} onQueue={enqueueSong}/>}
-  {isVideoke&&<section className="videoke-queue"><div className="queue-heading"><div><span className="cinema-eyebrow">PASS THE MIC</span><h2><ListMusic size={19}/> Song queue <small>({activity.queue.length})</small></h2></div><button className="cinema-primary" onClick={playNextSong} disabled={!isRoomHost||busy||!activity.queue.length}><SkipForward size={15}/> Next singer</button></div>{activity.singing&&<p className="now-singing"><Mic size={14}/> Now on stage: {activity.singing}</p>}<ol>{activity.queue.map((song,index)=><li key={song.id}><span className="queue-number">{index+1}</span><div><strong>{song.title}</strong><small>{song.singer}</small></div>{isRoomHost&&<button disabled={busy} onClick={()=>void removeSong(song.id)} aria-label={`Remove ${song.title}`}><X size={15}/></button>}</li>)}</ol>{!activity.queue.length&&<p className="queue-empty">No songs queued yet. Ask the host to add your song.</p>}{isRoomHost&&<form className="queue-form" onSubmit={addSong}><input aria-label="Song title" placeholder="Song title" value={songTitle} onChange={event=>setSongTitle(event.target.value)} required maxLength={120}/><input aria-label="Karaoke video URL" placeholder="YouTube or direct karaoke video URL" value={songUrl} onChange={event=>setSongUrl(event.target.value)} type="url" required/><select aria-label="Singer" value={singer} onChange={event=>setSinger(event.target.value)}><option value="">Choose singer (default: host)</option>{people.map(person=><option key={person.id} value={person.display_name||person.username}>{person.display_name||person.username}</option>)}</select><button className="cinema-primary" disabled={busy}><Plus size={14}/> Add song</button></form>}<p className="videoke-audio-note">Pick YouTube karaoke or direct videos with on-screen lyrics. Unmute your microphone to sing for the room. Headphones help prevent echo.</p></section>}
+  {isVideoke?<SongLibrary canQueue={seat.admitted} busy={busy} onQueue={enqueueSong}/>:<MovieLibrary busy={busy} onSelect={chooseMovie}/>}
+  {isVideoke&&<section className="videoke-queue"><div className="queue-heading"><div><span className="cinema-eyebrow">PASS THE MIC</span><h2><ListMusic size={19}/> Song queue <small>({activity.queue.length})</small></h2></div><button className="cinema-primary" onClick={playNextSong} disabled={!isRoomHost||busy||!activity.queue.length}><SkipForward size={15}/> Next singer</button></div>{activity.singing&&<p className="now-singing"><Mic size={14}/> Now on stage: {activity.singing}</p>}<ol>{activity.queue.map((song,index)=><li key={song.id}><span className="queue-number">{index+1}</span><div><strong>{song.title}</strong><small>{song.singer}</small></div>{isRoomHost&&<button disabled={busy} onClick={()=>void removeSong(song.id)} aria-label={`Remove ${song.title}`}><X size={15}/></button>}</li>)}</ol>{!activity.queue.length&&<p className="queue-empty">No songs queued yet. Ask the host to add your song.</p>}<p className="videoke-audio-note">Pick YouTube karaoke or direct videos with on-screen lyrics. Unmute your microphone to sing for the room. Headphones help prevent echo.</p></section>}
   </section>
   <aside className="cinema-chat"><div className="cinema-chat-tabs"><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={14}/> Chat</button><button className={tab==='people'?'active':''} onClick={()=>setTab('people')}>Participants <span>({people.length}/{seat.capacity})</span></button></div>{tab==='chat'?<><div className="cinema-messages">{messages.length===0&&<div className="cinema-chat-empty"><MessageCircle size={25}/><p>The best part is watching together.</p><small>Say hello to your room.</small></div>}{messages.map(message=>{const author=message.user_id===user?.id?me:authors[message.user_id];return <div className="cinema-message" key={message.id}><Avatar src={author?.avatar_url} name={author?.display_name||author?.username||'Tambay'}/><div><div className="chat-author">{author?.display_name||author?.username||'Tambay'}<time>{new Date(message.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></div><p>{message.content}</p></div></div>})}<div ref={chatEndRef}/></div><form onSubmit={sendMessage} className="cinema-chat-input"><input value={newMsg} onChange={event=>setNewMsg(event.target.value)} placeholder="Type a message..." aria-label="Room message" maxLength={2000}/><button type="submit" disabled={sending||!newMsg.trim()} aria-label="Send message"><Send size={17}/></button></form></>:<div className="cinema-people-list">{people.map(person=><div key={person.id}><Avatar src={person.avatar_url} name={person.display_name||person.username}/><span>{person.display_name||person.username}<small>In the room</small></span><i/></div>)}<p>Enable your camera and microphone to join the live call. They start off for everyone.</p></div>}</aside></div>
   {inviteFriendsOpen&&<InviteFriends roomId={room.id} roomName={room.name} onClose={()=>setInviteFriendsOpen(false)}/>}
-  {settingsOpen&&<div className="cinema-modal-backdrop"><section className="cinema-settings" role="dialog" aria-modal="true" aria-labelledby="cinema-settings-title"><button className="close-settings" onClick={()=>setSettingsOpen(false)} aria-label="Close settings"><X size={20}/></button><Clapperboard size={28}/><h2 id="cinema-settings-title">Set the mood.</h2><p>{isHost?(isVideoke?'Load a karaoke source here, or upload audio in the song library.':'Set the movie for Cinema. It stays saved when you switch to Videoke.'):'The host controls the room playback.'}</p>{isHost&&<form onSubmit={startCinema}><label htmlFor="cinema-url"><Link2 size={14}/> {isVideoke ? 'Karaoke video URL' : 'Movie URL'}</label><input id="cinema-url" type="url" required value={videoUrl} onChange={event=>setVideoUrl(event.target.value)} placeholder="YouTube link or https://example.com/movie.mp4"/><small>YouTube videos and direct MP4/WebM links are supported. Netflix and other streaming page URLs are not supported.</small><button className="cinema-primary" disabled={busy}>{busy?'Loading...':isVideoke?'Load karaoke video':cinema?'Change movie':'Start movie night'}</button></form>}<p className="cinema-privacy-note">Your camera stays off until you enable it.</p></section></div>}
+  {settingsOpen&&<div className="cinema-modal-backdrop"><section className="cinema-settings" role="dialog" aria-modal="true" aria-labelledby="cinema-settings-title"><button className="close-settings" onClick={()=>setSettingsOpen(false)} aria-label="Close settings"><X size={20}/></button><Clapperboard size={28}/><h2 id="cinema-settings-title">Room media</h2><p>Choose movies and music from the catalog below the player. The room host controls playback and the next singer.</p>{isAdmin&&<Link to="/admin/media" className="cinema-primary">Open media dashboard</Link>}<p className="cinema-privacy-note">Your camera stays off until you enable it.</p></section></div>}
  </div>
 }
 function PlusIcon(){return <Play size={14} fill="currentColor"/>}

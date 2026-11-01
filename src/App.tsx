@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import MainLayout from './components/layout/MainLayout'
 import Home from './pages/Home'
+import MediaDashboard from './pages/MediaDashboard'
 import Explore from './pages/Explore'
 import Friends from './pages/Friends'
 import Messages from './pages/Messages'
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="/my-tambayan" element={<MyTambayan />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/admin/media" element={<MediaDashboard />} />
               {/* ITO YUNG KULANG MO - ROOM DETAIL */}
               <Route path="/room/:id" element={<RoomDetail />} />
             </Route>

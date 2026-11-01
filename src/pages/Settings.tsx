@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+import { useMediaAdmin } from '../hooks/useMediaAdmin'
 import LogoutButton from '../components/auth/LogoutButton'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
@@ -5,11 +7,13 @@ import { Moon, Sun, User } from 'lucide-react'
 
 export default function Settings() {
     const { user, profile } = useAuth()
+    const {isAdmin}=useMediaAdmin()
     const { theme, toggleTheme } = useTheme()
 
     return (
         <div className="max-w-2xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold">Settings</h1>
+            {isAdmin&&<Link to="/admin/media" className="purple-button">Open media dashboard</Link>}
 
             <div className="bg-white dark:bg-zinc-900 rounded-2xl border p-4 space-y-4">
                 <div className="flex items-center gap-3">
