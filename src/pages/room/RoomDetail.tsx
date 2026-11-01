@@ -160,7 +160,8 @@ export default function RoomDetail() {
   if (!cinema?.id || !cinema.is_playing || !isHost) return
   const timer = window.setInterval(() => {
    const video = videoRef.current
-   if (video && video.readyState > 0) void syncPlayback(!video.paused && !video.ended, video.currentTime)
+   // A browser interruption is local; only explicit controls or ended events pause the room.
+   if (video && video.readyState > 0 && !video.paused && !video.ended) void syncPlayback(true, video.currentTime)
   }, 15000)
   return () => window.clearInterval(timer)
  }, [cinema?.id, cinema?.is_playing, isHost])

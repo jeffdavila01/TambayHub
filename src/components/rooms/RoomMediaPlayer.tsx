@@ -41,14 +41,23 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
  useEffect(()=>{
   if(!audioPath)return
   let active=true
+  let expiresAt=0
+  let resolving=false
   const resolve=async()=>{
-   const {data,error}=await supabase.storage.from('videoke-audio').createSignedUrl(audioPath,7200)
-   if(!active)return
-   if(error){propsRef.current.onError(`Unable to load uploaded audio: ${error.message}`);return}
-   setResolved({source,url:data.signedUrl})
+   // Keep a valid URL attached: changing src interrupts playback on every tab return.
+   if(resolving||Date.now()<expiresAt-10*60*1000)return
+   resolving=true
+   try {
+    const {data,error}=await supabase.storage.from('videoke-audio').createSignedUrl(audioPath,7200)
+    if(!active)return
+    if(error){propsRef.current.onError(`Unable to load uploaded audio: ${error.message}`);return}
+    expiresAt=Date.now()+7200*1000
+    setResolved({source,url:data.signedUrl})
+   } catch {if(active)propsRef.current.onError('Unable to refresh uploaded audio. Check your connection.')}
+   finally {resolving=false}
   }
   void resolve()
-  const timer=window.setInterval(()=>{void resolve()},45*60*1000)
+  const timer=window.setInterval(()=>{void resolve()},5*60*1000)
   const visible=()=>{if(document.visibilityState==='visible')void resolve()}
   document.addEventListener('visibilitychange',visible)
   return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',visible)}
