@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { playbackPosition, formatPlaybackTime, youtubePlaybackReport } from '../src/services/playbackClock.ts'
+import { playbackPosition, formatPlaybackTime, youtubePlaybackReport, mediaControlAction } from '../src/services/playbackClock.ts'
 const start=Date.parse('2026-11-01T00:00:00Z')
 test('late joiners catch up even after multiple hours',()=>{
  assert.equal(playbackPosition({playback_time:300,is_playing:true,updated_at:new Date(start).toISOString()},start+7200000),7500)
@@ -31,4 +31,14 @@ test('YouTube play reports only a transition and ignores repeated playing events
  assert.equal(youtubePlaybackReport(1,42,240,false),true)
  assert.equal(youtubePlaybackReport(1,42,240,true),null)
  assert.equal(youtubePlaybackReport(0,240,240,false),null)
+})
+
+test('host and participant controls follow actual device playback',()=>{
+ assert.equal(mediaControlAction(true,false,false),'room-play')
+ assert.equal(mediaControlAction(true,true,true),'room-pause')
+ assert.equal(mediaControlAction(true,true,false),'local-play')
+ assert.equal(mediaControlAction(false,true,true),'local-pause')
+ assert.equal(mediaControlAction(false,true,false),'local-play')
+ assert.equal(mediaControlAction(false,false,false),'wait')
+ assert.equal(mediaControlAction(false,false,true),'wait')
 })

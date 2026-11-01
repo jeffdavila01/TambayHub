@@ -23,7 +23,7 @@ function loadYoutube():Promise<YoutubeApi>{
  })
  return apiPromise
 }
-type Props={session:PlaybackSnapshot&{video_url:string},isHost:boolean,volume:number,onProgress:(time:number,duration:number)=>void,onHostPlayback:(playing:boolean,time:number)=>void,onError:(message:string)=>void}
+type Props={session:PlaybackSnapshot&{video_url:string},isHost:boolean,volume:number,onProgress:(time:number,duration:number,playing:boolean)=>void,onHostPlayback:(playing:boolean,time:number)=>void,onError:(message:string)=>void}
 const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer(props,ref){
  const videoRef=useRef<HTMLMediaElement>(null)
  const mountRef=useRef<HTMLDivElement>(null)
@@ -32,6 +32,8 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
  propsRef.current=props
  const [version,setVersion]=useState(0)
  const initialized=useRef('')
+ const locallyPaused=useRef(false)
+ useEffect(()=>{locallyPaused.current=false},[props.session.is_playing,props.isHost,props.session.video_url])
  const youtubeId=youtubeVideoId(props.session.video_url)
  const source=props.session.video_url
  const audioPath=storedAudioPath(source)
@@ -80,7 +82,12 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   get ended(){return driver.current?.ended??false},set ended(_value){},
   get readyState(){return driver.current?.readyState||0},set readyState(_value){},
   get volume(){return driver.current?.volume??1},set volume(value){if(driver.current)driver.current.volume=value},
-  play:()=>driver.current?.play()||Promise.resolve(),pause:()=>driver.current?.pause(),
+  play:()=>{
+   const media=driver.current
+   locallyPaused.current=false
+   if(media&&!propsRef.current.isHost)media.currentTime=playbackPosition(propsRef.current.session,Date.now(),media.duration)
+   return media?.play()||Promise.resolve()
+  },pause:()=>{if(!propsRef.current.isHost)locallyPaused.current=true;driver.current?.pause()},
  }),[])
  useEffect(()=>{
   if(!youtubeId){return}
@@ -131,13 +138,13 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
    const media=driver.current
    if(!media||!media.readyState)return
    const first=initialized.current!==source
-   if(first||!props.isHost){
+   if(first||(!props.isHost&&!locallyPaused.current)){
     const target=playbackPosition(props.session,Date.now(),media.duration)
     if(first||Math.abs(media.currentTime-target)>2)media.currentTime=target
     initialized.current=source
    }
    media.volume=props.volume
-   if(props.session.is_playing&&media.paused&&!media.ended)void media.play().catch(()=>propsRef.current.onError('Press Play to allow media playback in this browser.'))
+   if(props.session.is_playing&&media.paused&&!media.ended&&(props.isHost||!locallyPaused.current))void media.play().catch(()=>propsRef.current.onError('Press Play to allow media playback in this browser.'))
    else if(!props.session.is_playing&&!media.paused)media.pause()
   }
   apply()
@@ -145,7 +152,7 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   return()=>window.clearInterval(timer)
  },[props.session,props.isHost,props.volume,version,source])
  useEffect(()=>{
-  const timer=window.setInterval(()=>{const media=driver.current;if(media?.readyState)propsRef.current.onProgress(media.currentTime,media.duration)},500)
+  const timer=window.setInterval(()=>{const media=driver.current;if(media?.readyState)propsRef.current.onProgress(media.currentTime,media.duration,!media.paused&&!media.ended)},500)
   return()=>window.clearInterval(timer)
  },[])
  const loaded=()=>{driver.current=videoRef.current;initialized.current='';setVersion(value=>value+1)}

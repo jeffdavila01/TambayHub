@@ -20,3 +20,10 @@ export function youtubePlaybackReport(state:number,time:number,duration:number,r
  if(state===0&&roomPlaying&&Number.isFinite(duration)&&duration>0&&Number.isFinite(time)&&time>=duration-1)return false
  return null
 }
+
+export function mediaControlAction(isHost:boolean,roomPlaying:boolean,localPlaying:boolean) {
+ if(isHost&&!roomPlaying)return 'room-play'
+ if(!roomPlaying)return 'wait'
+ if(!localPlaying)return 'local-play'
+ return isHost?'room-pause':'local-pause'
+}
