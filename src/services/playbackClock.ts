@@ -12,3 +12,11 @@ export function formatPlaybackTime(value: number): string {
  const minutes = Math.floor(seconds / 60) % 60
  return hours ? `${hours}:${String(minutes).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}` : `${minutes}:${String(seconds % 60).padStart(2,'0')}`
 }
+
+// Embedded player pauses can be caused by buffering, seeking, or browser policy.
+// Room-wide pauses come from the room controls, not those local player events.
+export function youtubePlaybackReport(state:number,time:number,duration:number,roomPlaying:boolean):boolean|null {
+ if(state===1&&!roomPlaying)return true
+ if(state===0&&roomPlaying&&Number.isFinite(duration)&&duration>0&&Number.isFinite(time)&&time>=duration-1)return false
+ return null
+}

@@ -3,7 +3,7 @@ import { supabase } from '../../services/supabase'
 import { storedAudioPath } from '../../services/roomMedia'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { youtubeVideoId } from '../../services/mediaSource'
-import { playbackPosition, type PlaybackSnapshot } from '../../services/playbackClock'
+import { playbackPosition, youtubePlaybackReport, type PlaybackSnapshot } from '../../services/playbackClock'
 export type RoomMediaHandle = {currentTime:number,duration:number,paused:boolean,ended:boolean,readyState:number,volume:number,play:()=>Promise<void>,pause:()=>void}
 type YoutubePlayer = {getCurrentTime:()=>number,getDuration:()=>number,getPlayerState:()=>number,seekTo:(seconds:number,allowSeekAhead:boolean)=>void,playVideo:()=>void,pauseVideo:()=>void,setVolume:(value:number)=>void,unMute:()=>void,destroy:()=>void}
 type YoutubeApi = {Player: new(element:HTMLElement,options:Record<string,unknown>)=>YoutubePlayer}
@@ -32,7 +32,6 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
  propsRef.current=props
  const [version,setVersion]=useState(0)
  const initialized=useRef('')
- const lastYoutubeReport=useRef(0)
  const youtubeId=youtubeVideoId(props.session.video_url)
  const source=props.session.video_url
  const audioPath=storedAudioPath(source)
@@ -76,8 +75,6 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   if(!youtubeId){driver.current=videoRef.current;return}
   let active=true
   let player:YoutubePlayer|null=null
-  let pauseTimer:number|undefined
-  let ignorePauseUntil=0
   const mount=mountRef.current
   if(!mount)return
   initialized.current=''
@@ -90,13 +87,13 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
      const readyPlayer=player
      ytRef.current=readyPlayer
      driver.current={
-      get currentTime(){return readyPlayer.getCurrentTime()||0},set currentTime(value){ignorePauseUntil=Date.now()+1500;readyPlayer.seekTo(value,true)},
+      get currentTime(){return readyPlayer.getCurrentTime()||0},set currentTime(value){readyPlayer.seekTo(value,true)},
       get duration(){return readyPlayer.getDuration()||0},set duration(_value){},
       get paused(){return [-1,0,2,5].includes(readyPlayer.getPlayerState())},set paused(_value){},
       get ended(){return readyPlayer.getPlayerState()===0},set ended(_value){},
       get readyState(){return 1},set readyState(_value){},
       get volume(){return propsRef.current.volume},set volume(value){readyPlayer.setVolume(value*100)},
-      play:async()=>{ignorePauseUntil=Date.now()+1500;readyPlayer.unMute();readyPlayer.playVideo()},pause:()=>{ignorePauseUntil=Date.now()+1500;readyPlayer.pauseVideo()},
+      play:async()=>{readyPlayer.unMute();readyPlayer.playVideo()},pause:()=>{readyPlayer.pauseVideo()},
      }
      setVersion(value=>value+1)
     },
@@ -105,25 +102,9 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
      if(!active||!player)return
      const current=propsRef.current
      if(!current.isHost)return
-     window.clearTimeout(pauseTimer)
-     // YouTube emits temporary pauses during seeks and scripted playback changes.
-     // Publish a pause only after the player remains paused outside that transition.
-     if(event.data===2){
-      const reportPause=()=>{
-       if(!active||!player||player.getPlayerState()!==2)return
-       if(Date.now()<ignorePauseUntil){pauseTimer=window.setTimeout(reportPause,ignorePauseUntil-Date.now()+100);return}
-       const latest=propsRef.current
-       if(latest.isHost&&latest.session.is_playing&&document.visibilityState==='visible')latest.onHostPlayback(false,player.getCurrentTime()||0)
-      }
-      pauseTimer=window.setTimeout(reportPause,500)
-      return
-     }
      const time=player.getCurrentTime()||0
-     if(event.data===0){current.onHostPlayback(false,player.getDuration()||time);return}
-     if(event.data!==1)return
-     const playing=event.data===1
-     const differs=playing!==Boolean(current.session.is_playing)||Math.abs(time-playbackPosition(current.session,Date.now(),player.getDuration()))>2
-     if(differs&&Date.now()-lastYoutubeReport.current>600){lastYoutubeReport.current=Date.now();current.onHostPlayback(playing,time)}
+     const report=youtubePlaybackReport(event.data,time,player.getDuration(),Boolean(current.session.is_playing))
+     if(report!==null)current.onHostPlayback(report,time)
     },
     onError:(event:{data:number})=>{
      if(!active)return
@@ -132,7 +113,7 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
     },
    }})
   }).catch(error=>{if(active)propsRef.current.onError(error.message)})
-  return()=>{active=false;window.clearTimeout(pauseTimer);driver.current=null;ytRef.current=null;player?.destroy();mount.replaceChildren()}
+  return()=>{active=false;driver.current=null;ytRef.current=null;player?.destroy();mount.replaceChildren()}
  },[youtubeId,source])
  useEffect(()=>{
   const apply=()=>{

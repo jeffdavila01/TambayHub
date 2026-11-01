@@ -195,13 +195,16 @@ export default function RoomDetail() {
   if (!cinema || !isHost) return Promise.resolve(false)
   const sessionId = cinema.id
   const next = { is_playing: playing, playback_time: time, updated_at: new Date().toISOString() }
+  // Apply the host command immediately; a slow database response must not undo Play.
+  const before = cinema
+  setCinema(previous => previous?.id === sessionId ? { ...previous, ...next } : previous)
+  const rollback = () => setCinema(previous => previous?.id === sessionId && previous.updated_at === next.updated_at ? before : previous)
   const write = playbackWritesRef.current.then(async () => {
    try {
     const { error: syncError } = await supabase.from('room_media_sessions').update(next).eq('id', sessionId)
-    if (syncError) { setError(syncError.message); return false }
-    setCinema((previous: any) => previous?.id === sessionId ? { ...previous, ...next } : previous)
+    if (syncError) { rollback(); setError(syncError.message); return false }
     return true
-   } catch (err) { setError(err instanceof Error ? err.message : 'Unable to sync playback.'); return false }
+   } catch (err) { rollback(); setError(err instanceof Error ? err.message : 'Unable to sync playback.'); return false }
   })
   playbackWritesRef.current = write.then(() => undefined, () => undefined)
   return write
