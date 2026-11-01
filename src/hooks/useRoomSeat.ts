@@ -14,8 +14,8 @@ export function useRoomSeat(roomId?:string,userId?:string){
   const sessionId=crypto.randomUUID()
   setState({roomId,status:'loading',capacity:15,count:0,error:''})
   let released=false
-  const release=async()=>{if(released)return;released=true;const {error}=await supabase.rpc('release_room_seat',{p_room_id:roomId,p_session_id:sessionId});if(error){released=false;throw new Error(error.message)}}
-  leaveRef.current=async()=>{active=false;await release()}
+  const release=async(explicit=false)=>{if(released)return;released=true;const {error}=await supabase.rpc(explicit?'leave_room_seat':'release_room_seat',{p_room_id:roomId,p_session_id:sessionId});if(error){released=false;throw new Error(error.message)}}
+  leaveRef.current=async()=>{active=false;await release(true)}
   const renew=async()=>{
    if(!active||renewing)return
    renewing=true
@@ -26,6 +26,7 @@ export function useRoomSeat(roomId?:string,userId?:string){
      const message=error.code==='PGRST202'?'Room capacity setup is missing. Run 202611010003_room_capacity.sql in Supabase.':error.message
      setState(previous=>({...previous,roomId,status:'error',error:message}));return
     }
+    if(data?.room_closed){setState(previous=>({...previous,roomId,status:'error',error:'This room has ended because everyone left. Create or join another room.'}));return}
     setState({roomId,status:'joined',capacity:data.capacity,count:data.count,error:'',hostId:data.host_id})
    }catch(err){if(active)setState(previous=>({...previous,roomId,status:'error',error:err instanceof Error?err.message:'Unable to reserve a room slot.'}))}
    finally{renewing=false}
