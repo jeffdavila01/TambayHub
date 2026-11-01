@@ -17,3 +17,7 @@ export function storedAudioPath(source:string):string|null{
  const match=/^storage:\/\/videoke-audio\/([a-zA-Z0-9-]+\/[a-zA-Z0-9-]+\.(?:mp3|m4a|wav|ogg|webm|aac|flac))$/.exec(source)
  return match?.[1]||null
 }
+
+export function nextSongPlayback(url:string,now=Date.now()) {
+ return {video_url:url,is_playing:true,playback_time:0,updated_at:new Date(now).toISOString()}
+}

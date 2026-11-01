@@ -1,4 +1,4 @@
-import { mapMediaSessions, type MediaSession } from '../../services/roomMedia'
+import { mapMediaSessions, nextSongPlayback, type MediaSession } from '../../services/roomMedia'
 import SongLibrary from '../../components/rooms/SongLibrary'
 import RoomMediaPlayer, { type RoomMediaHandle } from '../../components/rooms/RoomMediaPlayer'
 import { normalizeMediaUrl, youtubeVideoId } from '../../services/mediaSource'
@@ -56,6 +56,7 @@ export default function RoomDetail() {
  const [busy, setBusy] = useState(false)
  const [fullscreen, setFullscreen] = useState(false)
  const playbackWritesRef = useRef<Promise<void>>(Promise.resolve())
+ const changingSongRef = useRef(false)
  const videoRef = useRef<RoomMediaHandle>(null)
  const localRef = useRef<HTMLVideoElement>(null)
  const stageRef = useRef<HTMLDivElement>(null)
@@ -192,7 +193,7 @@ export default function RoomDetail() {
   setCinema(result.data); setVideoUrl(''); setSettingsOpen(false); setError('')
  }
  const syncPlayback = (playing: boolean, time = videoRef.current?.currentTime || 0): Promise<boolean> => {
-  if (!cinema || !isHost) return Promise.resolve(false)
+  if (!cinema || !isHost || changingSongRef.current) return Promise.resolve(false)
   const sessionId = cinema.id
   const next = { is_playing: playing, playback_time: time, updated_at: new Date().toISOString() }
   // Apply the host command immediately; a slow database response must not undo Play.
@@ -244,10 +245,14 @@ export default function RoomDetail() {
   const song = activity.queue[0]
   if (!song || busy || !isRoomHost || !user || !id || activity.mode !== 'videoke') return
   setBusy(true)
-  const media = { video_url: song.url, is_playing: false, playback_time: 0 }
+  changingSongRef.current = true
+  // Finish older checkpoints before replacing the song in this shared session.
+  await playbackWritesRef.current
+  const media = nextSongPlayback(song.url)
   const result = cinema
    ? await supabase.from('room_media_sessions').update(media).eq('id', cinema.id).select().single()
    : await supabase.from('room_media_sessions').insert({ ...media, room_id: id, mode: 'videoke', host_id: user.id }).select().single()
+  changingSongRef.current = false
   if (result.error) setError(result.error.message)
   else {
    setCinema(result.data)

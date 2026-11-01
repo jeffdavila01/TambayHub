@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath } from '../src/services/roomMedia.ts'
+import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath, nextSongPlayback } from '../src/services/roomMedia.ts'
 import { normalizeMediaUrl } from '../src/services/mediaSource.ts'
 import { parseActivity, activityPrefix } from '../src/services/roomActivity.ts'
 test('Cinema and Videoke sources and positions stay separate',()=>{
@@ -25,4 +25,13 @@ test('stored audio refs stay stable without embedding expiring signed URLs',()=>
  const state={mode:'videoke',queue:[{id:'one',title:'My track',url:source,singer:'Alex'}],singing:''}
  assert.deepEqual(parseActivity(activityPrefix+JSON.stringify(state)),state)
  for(const bad of ['storage://videoke-audio/user/../secret.mp3','storage://other/user/file.mp3','storage://videoke-audio/user/file.exe'])assert.equal(storedAudioPath(bad),null)
+})
+
+test('Next singer starts the selected song at zero with a fresh playback clock',()=>{
+ const now=Date.parse('2026-11-01T10:00:00Z')
+ const next=nextSongPlayback('https://www.youtube.com/watch?v=M7lc1UVf-VE',now)
+ assert.equal(next.is_playing,true)
+ assert.equal(next.playback_time,0)
+ assert.equal(next.updated_at,new Date(now).toISOString())
+ assert.equal(next.video_url,'https://www.youtube.com/watch?v=M7lc1UVf-VE')
 })
