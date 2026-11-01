@@ -295,7 +295,7 @@ export default function RoomDetail() {
   catch { setError('Fullscreen is unavailable in this browser.') }
  }
  const me: Person = { id: user?.id || 'me', username: profile?.username || 'You', display_name: profile?.display_name || undefined, avatar_url: profile?.avatar_url || user?.user_metadata?.avatar_url }
- const people = participants.length ? participants : [me]
+ const people = [...new Map([me, ...participants, ...Object.keys(remoteMedia).filter(id => id !== user?.id && !participants.some(person => person.id === id)).map(id => authors[id] || { id, username: 'Tambay' })].map(person => [person.id, person])).values()]
  const slots: (Person | null)[] = [...people, ...Array(Math.max(0, 8 - people.length)).fill(null)]
  const tile = (person: Person | null, index: number) => <div className={`cinema-person ${!person ? 'empty-seat' : ''}`} key={person?.id || `seat-${index}`}>
   {person ? <>{person.id !== user?.id && remoteMedia[person.id] && <RemoteVideo media={remoteMedia[person.id]} name={person.display_name || person.username}/>}
