@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath, nextSongPlayback } from '../src/services/roomMedia.ts'
+import { mapMediaSessions, audioUploadType, audioUploadLimit, storedAudioPath, nextSongPlayback, mediaPlaybackSource, mergeMediaSessions } from '../src/services/roomMedia.ts'
 import { normalizeMediaUrl } from '../src/services/mediaSource.ts'
 import { parseActivity, activityPrefix } from '../src/services/roomActivity.ts'
 test('Cinema and Videoke sources and positions stay separate',()=>{
@@ -34,4 +34,24 @@ test('Next singer starts the selected song at zero with a fresh playback clock',
  assert.equal(next.playback_time,0)
  assert.equal(next.updated_at,new Date(now).toISOString())
  assert.equal(next.video_url,'https://www.youtube.com/watch?v=M7lc1UVf-VE')
+})
+
+test('Cinema and Videoke use the same long-running clock without a mode cutoff',async()=>{
+ const {playbackPosition}=await import('../src/services/playbackClock.ts')
+ const now=Date.parse('2026-11-01T10:00:00Z')
+ for(const mode of ['cinema','videoke']){
+  const row={id:mode,mode,...mediaPlaybackSource('https://example.com/media.mp4',true,now)}
+  assert.equal(playbackPosition(row,now+3*60*60*1000),10800)
+ }
+})
+test('late database snapshots cannot pause or replace a newer queued song',()=>{
+ const now=Date.parse('2026-11-01T10:00:00Z')
+ for(const mode of ['cinema','videoke']){
+  const current={id:mode,mode,...mediaPlaybackSource('new',true,now)}
+  const old={id:mode,mode,...mediaPlaybackSource('old',false,now-1000)}
+  const merged=mergeMediaSessions(mapMediaSessions([current]),[old])
+  assert.equal(merged[mode],current)
+  const pause={...current,is_playing:false,updated_at:new Date(now+1000).toISOString()}
+  assert.equal(mergeMediaSessions(merged,[pause])[mode],pause)
+ }
 })
