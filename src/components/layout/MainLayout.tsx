@@ -1,3 +1,4 @@
+import FloatingMessenger from '../messages/FloatingMessenger'
 import TopNav from './TopNav'
 import Sidebar from './Sidebar'
 import MobileNav from './MobileNav'
@@ -18,6 +19,7 @@ export default function MainLayout() {
                 </div>
             </div>
             <MobileNav />
+            <FloatingMessenger />
         </div>
     )
 }

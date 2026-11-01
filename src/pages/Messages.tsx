@@ -1,136 +1,60 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { loadFriendships } from '../services/friendships'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Search, Send, MessageCircle, ArrowLeft } from 'lucide-react'
+import { isUserId, type ChatPerson } from '../services/messageThreads'
+import DirectThread from '../components/messages/DirectThread'
+import Avatar from '../components/ui/Avatar'
+import { Search, MessageCircle, ArrowLeft } from 'lucide-react'
 
-interface DM {
-    id: string
-    sender_id: string
-    receiver_id: string
-    content: string
-    created_at: string
-    sender?: { username: string | null, avatar_url: string | null }
-    receiver?: { username: string | null, avatar_url: string | null }
-}
-
-interface Profile {
-    id: string
-    username: string | null
-    avatar_url: string | null
-}
-
-export default function Messages() {
-    const { user } = useAuth()
-    const [conversations, setConversations] = useState<Profile[]>([])
-    const [selectedUser, setSelectedUser] = useState<Profile | null>(null)
-    const [messages, setMessages] = useState<DM[]>([])
-    const [newMessage, setNewMessage] = useState('')
-    const [friends, setFriends] = useState<Profile[]>([])
-    const [searchQuery, setSearchQuery] = useState('')
-    const [error, setError] = useState('')
-
-    const fetchConversations = async () => {
-        if (!user) return
-        const { data } = await supabase.from('direct_messages').select('sender_id, receiver_id').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        if (!data) return
-        const userIds = new Set<string>()
-        data.forEach(d => { if (d.sender_id !== user.id) userIds.add(d.sender_id); if (d.receiver_id !== user.id) userIds.add(d.receiver_id) })
-        if (userIds.size === 0) return
-        const { data: profiles } = await supabase.from('profiles').select('id, username, avatar_url').in('id', Array.from(userIds))
-        if (profiles) setConversations(profiles)
-    }
-
-    const fetchFriends = async () => {
-        if (!user) return
-        try {
-            const rows = await loadFriendships(user.id, 'accepted')
-            const friendList = rows.map(row => row.requester_id === user.id ? row.receiver : row.requester).filter((person): person is Profile => Boolean(person))
-            setFriends([...new Map(friendList.map(person => [person.id, person])).values()])
-            setError('')
-        } catch (err) {
-            setError(`Hindi ma-load ang friends: ${err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Please try again.'}`)
-        }
-    }
-
-    const fetchMessages = async (otherId: string) => {
-        if (!user) return
-        const { data, error: loadError } = await supabase.from('direct_messages').select('*').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true })
-        if (loadError) { setError(loadError.message); return }
-        if (data) setMessages(data)
-    }
-
-    const sendMessage = async () => {
-        if (!newMessage.trim() || !user || !selectedUser) return
-        const { error: sendError } = await supabase.from('direct_messages').insert({ sender_id: user.id, receiver_id: selectedUser.id, content: newMessage.trim() })
-        if (sendError) { setError(sendError.message); return }
-        setError('')
-        setNewMessage('')
-        fetchMessages(selectedUser.id)
-    }
-
-    useEffect(() => {
-        fetchConversations()
-        fetchFriends()
-    }, [user])
-
-    useEffect(() => {
-        if (selectedUser) fetchMessages(selectedUser.id)
-    }, [selectedUser])
-
-    return (
-        <div className={`messages-layout surface ${selectedUser ? 'conversation-selected' : ''}`}>
-            <div className="messages-directory">
-                <div className="p-4 border-b">
-                    <h2 className="font-bold flex items-center gap-2"><MessageCircle className="w-5 h-5" /> Messages</h2>
-                    <div className="mt-3 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 rounded-full px-3 py-1.5">
-                        <Search className="w-4 h-4 text-zinc-400" />
-                        <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." className="bg-transparent outline-none text-sm w-full" />
-                    </div>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                    <div className="p-2 space-y-1">
-                        <p className="text-xs text-zinc-500 px-2 py-1">Conversations</p>
-                        {conversations.map(c => (
-                            <button key={c.id} onClick={() => setSelectedUser(c)} className={`w-full flex items-center gap-3 p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left ${selectedUser?.id === c.id ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`}>
-                                <img src={c.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${c.username}`} className="w-8 h-8 rounded-full" />
-                                <span className="text-sm font-medium truncate">{c.username}</span>
-                            </button>
-                        ))}
-                        <p className="text-xs text-zinc-500 px-2 py-1 mt-4">Friends</p>
-                        {friends.filter(f => f.username?.toLowerCase().includes(searchQuery.toLowerCase())).map(f => (
-                            <button key={f.id} onClick={() => setSelectedUser(f)} className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left">
-                                <img src={f.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${f.username}`} className="w-8 h-8 rounded-full" />
-                                <span className="text-sm truncate">{f.username}</span>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-
-            <div className="messages-conversation">
-                {error && <p role="alert" className="p-3 text-xs text-red-600">{error}</p>}
-                {!selectedUser ? (
-                    <div className="flex-1 grid place-items-center text-zinc-500"><p className="text-sm">Select a conversation</p></div>
-                ) : (
-                    <>
-                        <div className="message-thread-header p-4 border-b flex items-center gap-3"><button type="button" className="messages-back" onClick={()=>setSelectedUser(null)} aria-label="Back to conversations"><ArrowLeft size={20}/></button>
-                            <img src={selectedUser.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${selectedUser.username}`} className="w-8 h-8 rounded-full" />
-                            <span className="font-medium text-sm">{selectedUser.username}</span>
-                        </div>
-                        <div className="message-thread-body flex-1 overflow-y-auto p-4 space-y-2">
-                            {messages.map(m => {
-                                const isMe = m.sender_id === user?.id
-                                return <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[80%] break-words whitespace-pre-wrap px-3 py-2 rounded-2xl text-sm ${isMe ? 'bg-orange-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}>{m.content}</div></div>
-                            })}
-                        </div>
-                        <div className="message-thread-compose p-3 border-t flex gap-2">
-                            <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="Type a message..." className="flex-1 bg-zinc-100 dark:bg-zinc-800 rounded-full px-4 py-2 text-sm outline-none" />
-                            <button onClick={sendMessage} className="p-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-full"><Send className="w-4 h-4" /></button>
-                        </div>
-                    </>
-                )}
-            </div>
-        </div>
-    )
+export default function Messages(){
+ const {user}=useAuth()
+ const [params,setParams]=useSearchParams()
+ const requested=params.get('with')||''
+ const [conversations,setConversations]=useState<ChatPerson[]>([])
+ const [selected,setSelected]=useState<ChatPerson|null>(null)
+ const [friends,setFriends]=useState<ChatPerson[]>([])
+ const [search,setSearch]=useState('')
+ const [error,setError]=useState('')
+ const [drafts,setDrafts]=useState<Record<string,string>>({})
+ const refresh=useCallback(async()=>{
+  if(!user)return
+  const {data,error}=await supabase.from('direct_messages').select('sender_id,receiver_id').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order('created_at',{ascending:false})
+  if(error){setError(error.message);return}
+  const ids=[...new Set((data||[]).map(message=>message.sender_id===user.id?message.receiver_id:message.sender_id))]
+  const {data:profiles,error:profileError}=ids.length?await supabase.from('profiles').select('id,username,display_name,avatar_url').in('id',ids):{data:[],error:null}
+  if(profileError){setError(profileError.message);return}
+  const map=new Map<string,ChatPerson>((profiles||[]).map(person=>[person.id,person]))
+  setConversations(ids.map(id=>map.get(id)).filter((person):person is ChatPerson=>!!person))
+ },[user?.id])
+ useEffect(()=>{
+  if(!user)return
+  let active=true
+  void refresh()
+  void loadFriendships(user.id,'accepted').then(rows=>{
+   if(!active)return
+   const people=rows.map(row=>row.requester_id===user.id?row.receiver:row.requester).filter((person):person is ChatPerson=>!!person)
+   setFriends([...new Map(people.map(person=>[person.id,person])).values()])
+  }).catch(error=>{if(active)setError(error instanceof Error?error.message:'Unable to load friends.')})
+  const channel=supabase.channel(`dm-directory:${user.id}`)
+   .on('postgres_changes',{event:'INSERT',schema:'public',table:'direct_messages',filter:`receiver_id=eq.${user.id}`},()=>{void refresh()})
+   .on('postgres_changes',{event:'INSERT',schema:'public',table:'direct_messages',filter:`sender_id=eq.${user.id}`},()=>{void refresh()}).subscribe()
+  const timer=window.setInterval(()=>{void refresh()},15000)
+  return()=>{active=false;window.clearInterval(timer);void supabase.removeChannel(channel)}
+ },[user?.id,refresh])
+ useEffect(()=>{
+  if(!user||!isUserId(requested)||requested===user.id)return
+  let active=true
+  void supabase.from('profiles').select('id,username,display_name,avatar_url').eq('id',requested).maybeSingle().then(({data,error})=>{
+   if(!active)return
+   if(error)setError(error.message)
+   else if(data)setSelected(data)
+  })
+  return()=>{active=false}
+ },[requested,user?.id])
+ const choose=(person:ChatPerson)=>{setSelected(person);setParams({with:person.id},{replace:true})}
+ const matches=(person:ChatPerson)=>`${person.username||''} ${person.display_name||''}`.toLowerCase().includes(search.toLowerCase())
+ const personButton=(person:ChatPerson)=><button key={person.id} onClick={()=>choose(person)} className={`messages-person ${selected?.id===person.id?'selected':''}`}><Avatar src={person.avatar_url} name={person.display_name||person.username||'Tambay'}/><span>{person.display_name||person.username||'Tambay'}</span></button>
+ return <div className={`messages-layout surface ${selected?'conversation-selected':''}`}><div className="messages-directory"><div className="p-4 border-b"><h2 className="font-bold flex items-center gap-2"><MessageCircle size={20}/> Messages</h2><label className="messages-search"><Search size={16}/><input aria-label="Search conversations" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search..."/></label></div><div className="messages-contacts"><p>Conversations</p>{conversations.filter(matches).map(personButton)}<p>Friends</p>{friends.filter(matches).map(personButton)}{!conversations.length&&!friends.length&&<small>Add friends to start a conversation.</small>}</div></div><div className="messages-conversation">{error&&<p role="alert" className="direct-error">{error}</p>}{!selected?<div className="messages-empty"><MessageCircle size={32}/><p>Select a conversation</p></div>:<><div className="message-thread-header p-4 border-b flex items-center gap-3"><button type="button" className="messages-back" onClick={()=>{setSelected(null);setParams({},{replace:true})}} aria-label="Back to conversations"><ArrowLeft size={20}/></button><Avatar src={selected.avatar_url} name={selected.display_name||selected.username||'Tambay'}/><span>{selected.display_name||selected.username||'Tambay'}</span></div>{user&&<DirectThread key={`${user.id}:${selected.id}`} userId={user.id} otherId={selected.id} draft={drafts[selected.id]||''} onDraft={value=>setDrafts(previous=>({...previous,[selected.id]:value}))}/>}</>}</div></div>
 }
