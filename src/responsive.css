@@ -228,3 +228,5 @@ body { margin: 0; }
 
 @media(max-width:640px){.song-library{padding:18px 14px}.song-library>header{flex-wrap:wrap}.song-library h2{font-size:16px}.song-library-form{grid-template-columns:1fr}.song-library-search{min-height:48px}.song-library-form input{min-height:46px}.song-library-list .song-queue-button{min-height:42px}.song-library-list>article{gap:7px}.song-library-list strong{font-size:12px}.song-library-list>article>button:last-child{min-height:40px}.movie-viewport.youtube-viewport{min-height:200px}}
 @media(pointer:coarse){.cinema-room .song-library input{font-size:16px}}
+
+@media(max-width:640px){.song-source-switch button{min-height:42px;font-size:11px}.room-audio-player h3{font-size:22px}.room-audio-player{gap:9px}.audio-upload-field{padding:14px}}

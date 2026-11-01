@@ -1,3 +1,6 @@
+import { Music2 } from 'lucide-react'
+import { supabase } from '../../services/supabase'
+import { storedAudioPath } from '../../services/roomMedia'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { youtubeVideoId } from '../../services/mediaSource'
 import { playbackPosition, type PlaybackSnapshot } from '../../services/playbackClock'
@@ -22,7 +25,7 @@ function loadYoutube():Promise<YoutubeApi>{
 }
 type Props={session:PlaybackSnapshot&{video_url:string},isHost:boolean,volume:number,onProgress:(time:number,duration:number)=>void,onHostPlayback:(playing:boolean,time:number)=>void,onError:(message:string)=>void}
 const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer(props,ref){
- const videoRef=useRef<HTMLVideoElement>(null)
+ const videoRef=useRef<HTMLMediaElement>(null)
  const mountRef=useRef<HTMLDivElement>(null)
  const ytRef=useRef<YoutubePlayer|null>(null)
  const propsRef=useRef(props)
@@ -32,6 +35,24 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
  const lastYoutubeReport=useRef(0)
  const youtubeId=youtubeVideoId(props.session.video_url)
  const source=props.session.video_url
+ const audioPath=storedAudioPath(source)
+ const [resolved,setResolved]=useState({source,url:audioPath?'':source})
+ const playableUrl=audioPath?(resolved.source===source?resolved.url:''):source
+ useEffect(()=>{
+  if(!audioPath)return
+  let active=true
+  const resolve=async()=>{
+   const {data,error}=await supabase.storage.from('videoke-audio').createSignedUrl(audioPath,7200)
+   if(!active)return
+   if(error){propsRef.current.onError(`Unable to load uploaded audio: ${error.message}`);return}
+   setResolved({source,url:data.signedUrl})
+  }
+  void resolve()
+  const timer=window.setInterval(()=>{void resolve()},45*60*1000)
+  const visible=()=>{if(document.visibilityState==='visible')void resolve()}
+  document.addEventListener('visibilitychange',visible)
+  return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',visible)}
+ },[source,audioPath])
  const driver=useRef<RoomMediaHandle|null>(null)
  useImperativeHandle(ref,()=>({
   get currentTime(){return driver.current?.currentTime||0},set currentTime(value){if(driver.current)driver.current.currentTime=value},
@@ -111,6 +132,10 @@ const RoomMediaPlayer=forwardRef<RoomMediaHandle,Props>(function RoomMediaPlayer
   const timer=window.setInterval(()=>{const media=driver.current;if(media?.readyState)propsRef.current.onProgress(media.currentTime,media.duration)},500)
   return()=>window.clearInterval(timer)
  },[])
- return youtubeId?<div ref={mountRef} className="youtube-room-player" aria-label="YouTube room player"/>:<video key={source} ref={videoRef} src={source} playsInline onLoadedMetadata={()=>{driver.current=videoRef.current;initialized.current='';setVersion(value=>value+1)}} onEnded={()=>{if(props.isHost)props.onHostPlayback(false,driver.current?.duration||0)}} onError={()=>props.onError('Video could not load. Use an embeddable YouTube link or a direct MP4/WebM URL.')}/>
+ const loaded=()=>{driver.current=videoRef.current;initialized.current='';setVersion(value=>value+1)}
+ const ended=()=>{if(props.isHost)props.onHostPlayback(false,driver.current?.duration||0)}
+ const failed=()=>props.onError('Media could not load. Check the uploaded file or use an embeddable YouTube/direct media link.')
+ if(audioPath)return <div className="room-audio-player"><Music2 size={46}/><h3>Videoke audio</h3><p>Unmute your microphone and sing along.</p><small>Lyrics are included only when your source provides them.</small>{playableUrl&&<audio key={playableUrl} ref={element=>{videoRef.current=element}} src={playableUrl} onLoadedMetadata={loaded} onEnded={ended} onError={failed}/>}</div>
+ return youtubeId?<div ref={mountRef} className="youtube-room-player" aria-label="YouTube room player"/>:<video key={source} ref={element=>{videoRef.current=element}} src={playableUrl} playsInline onLoadedMetadata={loaded} onEnded={ended} onError={failed}/>
 })
 export default RoomMediaPlayer

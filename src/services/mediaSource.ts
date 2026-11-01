@@ -1,3 +1,4 @@
+import { storedAudioPath } from './roomMedia.ts'
 export function youtubeVideoId(value: string): string | null {
  try {
   const url = new URL(value.trim())
@@ -13,6 +14,7 @@ export function youtubeVideoId(value: string): string | null {
  } catch { return null }
 }
 export function normalizeMediaUrl(value: string): string {
+ if(storedAudioPath(value.trim()))return value.trim()
  const id = youtubeVideoId(value)
  if (id) return `https://www.youtube.com/watch?v=${id}`
  const url = new URL(value.trim())

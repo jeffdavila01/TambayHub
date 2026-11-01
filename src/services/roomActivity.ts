@@ -1,3 +1,4 @@
+import { normalizeMediaUrl } from './mediaSource.ts'
 export type RoomMode = 'cinema' | 'videoke'
 export type Song = { id: string, title: string, url: string, singer: string }
 export type RoomActivity = { mode: RoomMode, queue: Song[], singing: string }
@@ -10,7 +11,7 @@ export function parseActivity(content: string): RoomActivity | null {
         if (!['cinema', 'videoke'].includes(state.mode) || !Array.isArray(state.queue) || state.queue.length > 50 || typeof state.singing !== 'string') return null
         for (const song of state.queue) {
             if (!song || !['id', 'title', 'url', 'singer'].every(key => typeof song[key] === 'string' && song[key].trim())) return null
-            if (!['http:', 'https:'].includes(new URL(song.url).protocol)) return null
+            normalizeMediaUrl(song.url)
         }
         return { mode: state.mode, queue: state.queue, singing: state.singing }
     } catch { return null }
